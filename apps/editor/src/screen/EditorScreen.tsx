@@ -42,7 +42,7 @@ import { NewFigureDialog } from './NewFigureDialog'
 import { TableView } from './TableView'
 import { ChartDataDrawer, dataPanelRoom, GraphView } from './GraphView'
 import { IconsView } from './IconsView'
-import { editorTools, panelForSelection, panelForTool, panelNames, toolForPanel } from './tools'
+import { editorTools, panelForSelection, panelForTool, panelNames, toolAfterSelectionEnds, toolForPanel } from './tools'
 import { iconById, loadIconSvg, placementSize } from '../editor/icon-library'
 import { PropertiesPanel } from './PropertiesPanel'
 import { TextStyleControls, TextView } from './TextView'
@@ -275,6 +275,18 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
   useEffect(() => {
     if (figure && toolForPanel(state.tool, railTool) !== state.tool) figure.setTool('select')
   }, [figure, railTool, state.tool])
+
+  // Letting go of a selection while the Arrows panel is open turns the arrow tool back on (see toolAfterSelectionEnds).
+  // Only at the moment the selection ends, so Escape with nothing selected still turns the tool off.
+  const hadSelection = useRef(false)
+  useEffect(() => {
+    const has = state.selection !== null
+    if (figure && hadSelection.current && !has) {
+      const next = toolAfterSelectionEnds(state.tool, railTool)
+      if (next !== state.tool) figure.setTool(next)
+    }
+    hadSelection.current = has
+  }, [figure, railTool, state.selection, state.tool])
 
   // Save a moment after each change, so a drag doesn't save on every frame.
   useEffect(() => {

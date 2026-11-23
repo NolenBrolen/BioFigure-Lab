@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
-import { toolForPanel } from './tools'
+import { toolAfterSelectionEnds, toolForPanel } from './tools'
+
+describe('tool when a selection ends', () => {
+  it('turns the arrow tool back on when an arrow selected in the Arrows panel is let go, so its anchors show again', () => {
+    expect(toolAfterSelectionEnds('select', 'arrows')).toBe('arrow')
+  })
+
+  it('leaves the tool alone in other panels, and a drawing tool that is already on', () => {
+    expect(toolAfterSelectionEnds('select', 'icons')).toBe('select')
+    expect(toolAfterSelectionEnds('select', 'shapes')).toBe('select')
+    expect(toolAfterSelectionEnds('arrow', 'arrows')).toBe('arrow')
+    expect(toolAfterSelectionEnds('line', 'arrows')).toBe('line')
+  })
+})
 
 describe('tool kept when a panel opens', () => {
   it('turns off the arrow tool in the Icons panel, so clicking an icon grabs it instead of drawing an arrow', () => {

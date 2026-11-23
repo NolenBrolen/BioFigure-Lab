@@ -34,6 +34,19 @@ describe("icon rules", () => {
     expect(checkIcon(goodSvg.replace("<circle", "<image href='x.png'/><circle"), goodMeta)).toHaveLength(1);
   });
 
+  it("accepts an optional text slot inside the grid and rejects a broken one", () => {
+    const slot = { x: 34.5, y: 60, width: 59, height: 24 };
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: slot })).toEqual([]);
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: { ...slot, width: 0 } })).toHaveLength(1);
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: { ...slot, x: 100 } })).toHaveLength(1);
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: { ...slot, y: -1 } })).toHaveLength(1);
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: { x: 1, y: 1, width: "5", height: 5 } })).toHaveLength(1);
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: null })).toHaveLength(1);
+    // The starting text is optional, and must be a string.
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: { ...slot, defaultText: "Ethanol" } })).toEqual([]);
+    expect(checkIcon(goodSvg, { ...goodMeta, textSlot: { ...slot, defaultText: 5 } })).toHaveLength(1);
+  });
+
   it("rejects anything that could run code or load from elsewhere", () => {
     expect(checkIcon(goodSvg.replace("<circle", "<script>alert(1)</script><circle"), goodMeta)).not.toEqual([]);
     expect(checkIcon(goodSvg.replace("<circle", "<circle onclick='x()'"), goodMeta)).not.toEqual([]);

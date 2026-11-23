@@ -21,3 +21,11 @@ describe('settingGroups', () => {
     expect(shapeBarSets(settingGroups(['Font', 'Font size', 'Colour', 'Align']))).toBeUndefined()
   })
 })
+
+describe('an icon with a text slot on a phone', () => {
+  it('gets one Label text item holding the field and the Show text switch, before Properties', () => {
+    const groups = settingGroups(['Colour mode', 'Colour', 'Label text', 'Show text', 'Lines', 'Size (mm)', 'Opacity'])
+    expect(groups.map((group) => group.label)).toEqual(['Colour', 'Label text', 'Properties'])
+    expect(groups.find((group) => group.label === 'Label text')?.rows).toEqual(['Label text', 'Show text', 'Lines'])
+  })
+})

@@ -5,20 +5,26 @@
  * Selected, it shows the same box as other objects, with the same rotate
  * areas just outside its corners, but no handles that stretch it. Once let
  * go of, a turned arrow's box squares up again (see squareUp).
+ * Elbow and U-shaped arrows leave and enter an end along the side it is attached to.
  * Drawn with the same geometry as the panel tiles, and exported as plain SVG
  * paths, so it stays vector in SVG and PDF.
  */
-import { CORNER_ROUTES, drawArrow, arrowBounds, routePoints, type ArrowLook, type EndKind, type LineStyle, type MidMark, type Route } from '@biofigure-lab/ui/lib/arrow-geometry'
+import { CORNER_ROUTES, drawArrow, arrowBounds, routePoints, type ArrowLook, type EndDirs, type EndKind, type LineStyle, type MidMark, type Route } from '@biofigure-lab/ui/lib/arrow-geometry'
 import { Control, FabricObject, Point, classRegistry, util, type TPointerEvent, type Transform } from 'fabric'
 
-import { arrowSvg, type ConnectorEnd } from './connectors'
+import { arrowSvg, type ConnectorEnd, type Side } from './connectors'
 import type { XY } from './geometry'
 
 /** The connector's own saved properties, besides Fabric's usual ones. */
-const CONNECTOR_PROPERTIES = ['x1', 'y1', 'x2', 'y2', 'route', 'lineStyle', 'startEnd', 'endEnd', 'mid', 'attachStart', 'attachEnd'] as const
+const CONNECTOR_PROPERTIES = ['x1', 'y1', 'x2', 'y2', 'route', 'lineStyle', 'startEnd', 'endEnd', 'mid', 'attachStart', 'attachEnd', 'attachStartSide', 'attachEndSide', 'startDir', 'endDir'] as const
 
 /** What Fabric reports as the action while an end handle is dragged. */
 export const MOVE_END_ACTION = 'moveArrowEnd'
+
+/** Which way an arrow's end leaves its object, in the arrow's own frame. */
+export type Dir = 'up' | 'down' | 'left' | 'right'
+
+const DIR_VECTORS: Record<Dir, XY> = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }
 
 export type ConnectorOptions = Partial<ArrowLook> & { stroke?: string; strokeWidth?: number }
 
@@ -35,9 +41,21 @@ export class Connector extends FabricObject {
   declare startEnd: EndKind
   declare endEnd: EndKind
   declare mid: MidMark
-  /** Ids of the objects the start and end are stuck to. */
+  /** Ids of the objects the start and end are stuck to, and which side of each (none for arrows attached before sides existed). */
   declare attachStart?: string
   declare attachEnd?: string
+  declare attachStartSide?: Side
+  declare attachEndSide?: Side
+  /**
+   * The way an elbow or U-shaped arrow leaves its start and enters its end, in
+   * the arrow's own frame, when that end is attached to a chosen side: the way
+   * that side faces. Saved with the arrow, so the drawing, the box, hit tests
+   * and the end handles always agree, through selecting, undo and reopening.
+   * Set whenever the ends are placed (see setSideNormals); none for ends with
+   * no side.
+   */
+  declare startDir?: Dir
+  declare endDir?: Dir
 
   constructor(options: Record<string, unknown> = {}) {
     super(options)
@@ -77,16 +95,43 @@ export class Connector extends FabricObject {
   setLook(look: Partial<ArrowLook>): void {
     const { route, line, start, end, mid } = { ...this.look, ...look }
     const [a, b] = this.pagePoints()
-    this.set({ route, lineStyle: line, startEnd: start, endEnd: end, mid })
+    // Another route starts from the plain rules again (attached sides then set their directions afresh).
+    this.set({ route, lineStyle: line, startEnd: start, endEnd: end, mid, ...(route !== this.route && { startDir: undefined, endDir: undefined }) })
     this.setPagePoints(a, b)
+  }
+
+  /** The saved directions as the geometry wants them, or none when no end has one. */
+  ownDirs(): EndDirs | undefined {
+    const start = this.startDir && DIR_VECTORS[this.startDir]
+    const end = this.endDir && DIR_VECTORS[this.endDir]
+    return start || end ? { ...(start && { start }), ...(end && { end }) } : undefined
+  }
+
+  /**
+   * Take the way each attached side faces on the page (outward, unit vectors)
+   * and keep it as the arrow's own saved directions: turned back by the
+   * arrow's own turn and rounded to an axis. An end left out keeps its
+   * direction (a detached arrow keeps its shape); `null` clears it, for an end
+   * attached with no side.
+   */
+  setSideNormals(normals: { start?: XY | null; end?: XY | null }): void {
+    const turn = util.degreesToRadians(this.angle)
+    const own = (normal: XY | null | undefined, kept: Dir | undefined): Dir | undefined => {
+      if (normal === undefined) return kept
+      if (normal === null) return undefined
+      const x = normal.x * Math.cos(turn) + normal.y * Math.sin(turn)
+      const y = -normal.x * Math.sin(turn) + normal.y * Math.cos(turn)
+      return Math.abs(x) > Math.abs(y) ? (x > 0 ? 'right' : 'left') : y > 0 ? 'down' : 'up'
+    }
+    this.set({ startDir: own(normals.start, this.startDir), endDir: own(normals.end, this.endDir) })
   }
 
   /** Both ends with what they're stuck to, in page coordinates. */
   ends(): [ConnectorEnd, ConnectorEnd] {
     const [a, b] = this.pagePoints()
     return [
-      { point: a, ...(this.attachStart && { attach: this.attachStart }) },
-      { point: b, ...(this.attachEnd && { attach: this.attachEnd }) },
+      { point: a, ...(this.attachStart && { attach: this.attachStart }), ...(this.attachStart && this.attachStartSide && { side: this.attachStartSide }) },
+      { point: b, ...(this.attachEnd && { attach: this.attachEnd }), ...(this.attachEnd && this.attachEndSide && { side: this.attachEndSide }) },
     ]
   }
 
@@ -100,13 +145,16 @@ export class Connector extends FabricObject {
   /**
    * Move the ends to these page points; the object's box is fitted around the
    * arrow again. A turned arrow stays turned: the box is fitted in its own
-   * turned frame. Only for arrows not inside a group.
+   * turned frame. Only for arrows not inside a group. `normals` are the ways
+   * the attached sides face (see setSideNormals); left out, the saved
+   * directions stay as they are.
    */
-  setPagePoints(a: XY, b: XY): void {
+  setPagePoints(a: XY, b: XY, normals?: { start?: XY | null; end?: XY | null }): void {
+    if (normals) this.setSideNormals(normals)
     const turn = util.degreesToRadians(this.angle)
     const back = util.degreesToRadians(360 - this.angle)
     const [ownA, ownB] = [new Point(a).rotate(back), new Point(b).rotate(back)]
-    const box = arrowBounds(ownA, ownB, this.look, this.strokeWidth)
+    const box = arrowBounds(ownA, ownB, this.look, this.strokeWidth, this.ownDirs())
     const centre = new Point(box.left + box.width / 2, box.top + box.height / 2)
     // Fabric adds the line width to the box itself.
     this.set({
@@ -143,7 +191,7 @@ export class Connector extends FabricObject {
 
   /** The arrow's points in its own space, for drawing. */
   drawing(): ReturnType<typeof drawArrow> {
-    return drawArrow({ x: this.x1, y: this.y1 }, { x: this.x2, y: this.y2 }, this.look, this.strokeWidth)
+    return drawArrow({ x: this.x1, y: this.y1 }, { x: this.x2, y: this.y2 }, this.look, this.strokeWidth, this.ownDirs())
   }
 
   _render(ctx: CanvasRenderingContext2D): void {
@@ -192,7 +240,7 @@ const grabOffsets = new WeakMap<Transform, XY>()
 /** One end of the arrow and the direction it points out in, on screen. */
 function screenEnd(object: Connector, index: 0 | 1): { end: Point; out: XY } {
   const matrix = util.multiplyTransformMatrices(object.getViewportTransform(), object.calcTransformMatrix())
-  const path = routePoints({ x: object.x1, y: object.y1 }, { x: object.x2, y: object.y2 }, object.route)
+  const path = routePoints({ x: object.x1, y: object.y1 }, { x: object.x2, y: object.y2 }, object.route, object.ownDirs())
   const [end, before] = (index === 0 ? path.slice(0, 2) : path.slice(-2).reverse()).map((p) => util.transformPoint(new Point(p.x, p.y), matrix)) as [Point, Point]
   const length = Math.hypot(end.x - before.x, end.y - before.y)
   return { end, out: length === 0 ? { x: 0, y: 0 } : { x: (end.x - before.x) / length, y: (end.y - before.y) / length } }
@@ -236,8 +284,8 @@ function endControl(index: 0 | 1): Control {
       const snapper = (connector.canvas as { snapArrowEnd?: ArrowEndSnapper } | undefined)?.snapArrowEnd
       const point = snapper ? snapper(free, connector, event) : free
       const [a, b] = connector.pagePoints()
-      if (index === 0) connector.set({ attachStart: undefined })
-      else connector.set({ attachEnd: undefined })
+      if (index === 0) connector.set({ attachStart: undefined, attachStartSide: undefined })
+      else connector.set({ attachEnd: undefined, attachEndSide: undefined })
       connector.setPagePoints(index === 0 ? point : a, index === 0 ? b : point)
       return true
     },

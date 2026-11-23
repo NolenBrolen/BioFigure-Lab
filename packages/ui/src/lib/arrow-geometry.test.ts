@@ -24,6 +24,19 @@ describe('arrow geometry', () => {
     expect(routePoints(a, { x: 10, y: 0 }, 'u-shape')).toEqual([a, { x: 0, y: 5 }, { x: 10, y: 5 }, { x: 10, y: 0 }])
   })
 
+  it('lets a U-shaped arrow leave from the side an end is attached to, and an elbow leave up or down', () => {
+    const up = { x: 0, y: -1 }
+    // Up from the start, across above both ends, and down into the end.
+    expect(routePoints({ x: 0, y: 20 }, { x: 100, y: 0 }, 'u-shape', { start: up })).toEqual([{ x: 0, y: 20 }, { x: 0, y: -20 }, { x: 100, y: -20 }, { x: 100, y: 0 }])
+    // Only the end has a side: it still decides the way the U goes.
+    expect(routePoints(a, { x: 100, y: 0 }, 'u-shape', { end: up })[1]).toEqual({ x: 0, y: -20 })
+    // Out to the right of both ends.
+    expect(routePoints(a, { x: 0, y: 100 }, 'u-shape', { start: { x: 1, y: 0 } })).toEqual([a, { x: 20, y: 0 }, { x: 20, y: 100 }, { x: 0, y: 100 }])
+    // Elbow: up/down first when the start faces up or down.
+    expect(routePoints(a, { x: 100, y: 40 }, 'elbow', { start: up })).toEqual([a, { x: 0, y: 20 }, { x: 100, y: 20 }, { x: 100, y: 40 }])
+    expect(routePoints(a, { x: 100, y: 40 }, 'elbow', { start: { x: 1, y: 0 } })).toEqual(routePoints(a, { x: 100, y: 40 }, 'elbow'))
+  })
+
   it('starts and ends curved arrows exactly at their two ends', () => {
     const points = routePoints(a, b, 'curved')
     expect(points[0]).toEqual(a)

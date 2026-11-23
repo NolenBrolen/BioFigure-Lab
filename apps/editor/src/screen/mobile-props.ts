@@ -18,6 +18,7 @@ import {
   Asterisk,
   LetterText,
   Captions,
+  Tag,
   Brackets,
   ChartColumn,
   Circle,
@@ -69,6 +70,7 @@ const OWN_ITEM: Record<string, LucideIcon> = {
   [TEXT_SIZE]: ALargeSmall,
   Statistics: Asterisk,
   Labels: Captions,
+  'Label text': Tag,
 }
 
 /**
@@ -100,6 +102,8 @@ const SHAPE_TEXT_ITEMS: Record<string, { label: string; icon: LucideIcon }> = {
 /** Rows that belong with another setting's item. */
 const JOINS: Record<string, string> = {
   'Colour mode': 'Colour',
+  'Show text': 'Label text',
+  Lines: 'Label text',
   Templates: 'Colours',
   'X axis': 'Axes',
   'Y axis': 'Axes',

@@ -25,6 +25,16 @@ export function toolForPanel(tool: DrawTool, panel: string): DrawTool {
   return home === undefined || home === panel ? tool : 'select'
 }
 
+/**
+ * The tool to turn on when a selection ends. With the Arrows panel open and
+ * Select on (an arrow was selected there to restyle it), letting go of it
+ * hands back to the arrow tool, so its anchors show again and the next drag
+ * draws: the open panel and the tool agree. Otherwise the tool stays.
+ */
+export function toolAfterSelectionEnds(tool: DrawTool, panel: string): DrawTool {
+  return panel === 'arrows' && tool === 'select' ? 'arrow' : tool
+}
+
 /** The rail tool whose panel shows each kind of selected object's properties. Groups and several objects have none. */
 export const panelForSelection: Partial<Record<SelectionInfo['kind'], string>> = { shape: 'shapes', line: 'arrows', text: 'text', icon: 'icons', chart: 'graph', table: 'table' }
 

@@ -19,6 +19,24 @@ export type LibraryIcon = {
   name: string
   keywords: string[]
   category: string
+  /** A rectangle on the icon's 128x128 grid where the user can type text (a bottle's label). */
+  textSlot?: TextSlot
+}
+
+/** A rectangle in an icon's 128x128 grid units, with the text the icon starts with. */
+export type TextSlot = {
+  x: number
+  y: number
+  width: number
+  height: number
+  /** The text a freshly placed icon starts with (default "Label"). */
+  defaultText?: string
+  /**
+   * How steeply the label slopes, in degrees: its horizontal edges run down to the right by this angle
+   * (negative: up to the right), its vertical edges stay vertical. The text is slanted the same way, so it
+   * sits on a label seen at an angle. The rectangle is then the label before it was slanted. Default 0.
+   */
+  skewY?: number
 }
 
 type IconMeta = Omit<LibraryIcon, 'id'>

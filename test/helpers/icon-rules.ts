@@ -34,5 +34,25 @@ export function checkIcon(svg: string, meta: unknown): string[] {
   ) {
     problems.push("metadata needs at least one keyword");
   }
+  if (m.textSlot !== undefined) {
+    const slot = m.textSlot as Record<string, unknown> | null;
+    if (slot && typeof slot === "object" && slot.defaultText !== undefined && typeof slot.defaultText !== "string") {
+      problems.push("textSlot defaultText must be a string");
+    }
+    if (slot && typeof slot === "object" && slot.skewY !== undefined && !(typeof slot.skewY === "number" && Math.abs(slot.skewY) < 80)) {
+      problems.push("textSlot skewY must be a number of degrees between -80 and 80");
+    }
+    const num = (key: string) => (slot && typeof slot === "object" ? slot[key] : undefined);
+    const ok = (key: string) => typeof num(key) === "number" && Number.isFinite(num(key));
+    if (!slot || typeof slot !== "object" || !["x", "y", "width", "height"].every(ok)) {
+      problems.push("textSlot needs finite numbers x, y, width and height");
+    } else {
+      const [x, y, width, height] = ["x", "y", "width", "height"].map((key) => num(key) as number);
+      if (width! <= 0 || height! <= 0) problems.push("textSlot width and height must be above 0");
+      else if (x! < 0 || y! < 0 || x! + width! > 128 || y! + height! > 128) {
+        problems.push("textSlot must lie inside the 128 x 128 grid");
+      }
+    }
+  }
   return problems;
 }

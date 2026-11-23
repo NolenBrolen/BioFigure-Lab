@@ -373,17 +373,72 @@ function wrap(text: string, fits: (line: string) => boolean): string[] {
   return lines
 }
 
-/** Brackets stacked so none overlaps another on the same row: short spans low, long spans higher. */
-function bracketRows<T extends { a: number; b: number }>(pairs: T[]): (T & { row: number })[] {
-  const rows: { a: number; b: number }[][] = []
-  return [...pairs]
-    .sort((x, y) => x.b - x.a - (y.b - y.a) || x.a - y.a)
-    .map((pair) => {
-      let row = rows.findIndex((taken) => taken.every((t) => pair.b <= t.a || pair.a >= t.b))
-      if (row === -1) row = rows.push([]) - 1
-      rows[row]?.push(pair)
-      return { ...pair, row }
-    })
+/*
+ * A significance bracket, in parts of the font size: its feet drop under the
+ * line, with a dot under each foot; its label sits over the line's middle
+ * (beside it, lying down); stars and "ns" reach about this high over their baseline.
+ */
+const FOOT_DROP = 0.35
+const FOOT_DOT = 0.3
+const LABEL_LIFT = 0.2
+const LABEL_SIDE = 0.35
+const GLYPH_HEIGHT = 0.75
+
+type Box = { x1: number; y1: number; x2: number; y2: number }
+const meets = (p: Box, q: Box) => p.x1 < q.x2 && q.x1 < p.x2 && p.y1 < q.y2 && q.y1 < p.y2
+
+type BracketPlace = { size: number; rowStep: number; horizontal: boolean; dots: boolean; x: (group: number) => number }
+
+/**
+ * Where a bracket's label and the rest of its ink (line, feet, dots) sit on a
+ * row, worked out upright: groups across, rows going up from the plot's top
+ * (so y is negative). `width` is the label's width.
+ */
+function bracketInk(pair: { a: number; b: number; width: number }, row: number, at: BracketPlace): { label: Box; marks: Box[] } {
+  const { size } = at
+  const by = -(row + 0.35) * at.rowStep
+  const x1 = at.x(pair.a)
+  const x2 = at.x(pair.b)
+  const middle = (x1 + x2) / 2
+  const pad = size * 0.1
+  // Upright the label stands over the line's middle; lying down it reads on from the line, over the bracket's middle.
+  const label = at.horizontal
+    ? { x1: middle - (GLYPH_HEIGHT - LABEL_SIDE) * size - pad, y1: by - LABEL_SIDE * size - pair.width - pad, x2: middle + LABEL_SIDE * size + pad, y2: by - LABEL_SIDE * size + pad }
+    : { x1: middle - pair.width / 2 - pad, y1: by - (LABEL_LIFT + GLYPH_HEIGHT) * size - pad, x2: middle + pair.width / 2 + pad, y2: by - LABEL_LIFT * size + pad }
+  if (pair.a === pair.b) return { label, marks: [] }
+  const footHalf = at.dots ? FOOT_DOT * size : 0.5
+  const footLow = by + (FOOT_DROP + (at.dots ? FOOT_DOT * 2 : 0)) * size
+  return {
+    label,
+    marks: [{ x1, y1: by - 0.5, x2, y2: by + 0.5 }, ...[x1, x2].map((foot) => ({ x1: foot - footHalf, y1: by, x2: foot + footHalf, y2: footLow }))],
+  }
+}
+
+/**
+ * Brackets stacked in rows, short spans low and long spans higher: each goes
+ * on the lowest row where its line overlaps no other on that row, and no
+ * label touches another bracket's ink. A foot (and its dot) reaches down
+ * towards the row below, where it could land on the label of a bracket whose
+ * middle is that same group, so such a bracket moves up a row.
+ */
+function bracketRows<T extends { a: number; b: number; width: number }>(pairs: T[], at: BracketPlace): (T & { row: number })[] {
+  const placed: { pair: T; row: number; label: Box; marks: Box[] }[] = []
+  for (const pair of [...pairs].sort((p, q) => p.b - p.a - (q.b - q.a) || p.a - q.a)) {
+    for (let row = 0; ; row++) {
+      const ink = bracketInk(pair, row, at)
+      const clear = placed.every(
+        (other) =>
+          (other.row !== row || pair.b <= other.pair.a || pair.a >= other.pair.b) &&
+          ![other.label, ...other.marks].some((box) => meets(box, ink.label)) &&
+          !ink.marks.some((box) => meets(box, other.label)),
+      )
+      if (clear) {
+        placed.push({ pair, row, ...ink })
+        break
+      }
+    }
+  }
+  return placed.map(({ pair, row }) => ({ ...pair, row }))
 }
 
 const DOT_RADIUS = 3
@@ -434,8 +489,7 @@ export function drawChart(source: ChartData, measure: Measure = roughMeasure): C
             names: chart.groups.map((g) => g.name),
           },
         )
-  const brackets = bracketRows((result?.comparisons ?? []).filter((c) => chart.showNs || c.p < 0.05))
-  const bracketRowCount = Math.max(0, ...brackets.map((b) => b.row + 1))
+  const pairs = (result?.comparisons ?? []).filter((c) => chart.showNs || c.p < 0.05).map((c) => ({ ...c, width: measure(stars(c.p), size, font) }))
   const rowStep = size * 1.5
 
   const captionSize = size - 1
@@ -448,22 +502,30 @@ export function drawChart(source: ChartData, measure: Measure = roughMeasure): C
   // Lying down: group names and their title are on the left, the numbers and the y axis title under the
   // plot, and the brackets stand to its right.
   const nameWidth = chart.tickLabels ? Math.max(0, ...chart.groups.map((g) => measure(g.name, size, font))) : 0
-  const bracketRoom = bracketRowCount > 0 ? bracketRowCount * rowStep + size : 0
   const left = horizontal ? (chart.xTitle ? titleSize * 1.6 : 0) + (chart.tickLabels ? nameWidth + 8 : 6) : (label ? titleSize * 1.6 : 0) + tickWidth + 8
-  const right = (chart.legend ? legendWidth + 8 : size) + (horizontal ? bracketRoom : 0)
-  const top = size * 0.8 + (hasTitle && chart.titlePosition === 'top' ? headSize * 1.6 : 0) + (horizontal ? 0 : bracketRowCount * rowStep)
   const axisBottom = horizontal ? (chart.tickLabels ? size * 1.8 : 6) + (label ? titleSize * 1.6 : 0) : (chart.tickLabels ? size * 1.8 : 6) + (chart.xTitle ? titleSize * 1.6 : 0)
   const bottom = axisBottom + (hasTitle && chart.titlePosition === 'bottom' ? headSize * 1.6 : 0) + (captionLines.length ? captionLines.length * captionSize * 1.35 + captionSize * 0.4 : 0)
-  const w = Math.max(chart.width - left - right, 20)
-  const h = Math.max(chart.height - top - bottom, 20)
-  // Along the values, and along the groups.
-  const valueLen = horizontal ? w : h
-  const groupLen = horizontal ? h : w
-  /** Where a value sits along the plot's upright height (0 at the top). */
-  const y = (value: number) => valueLen - ((Math.min(Math.max(value, axis.min), axis.max) - axis.min) / (axis.max - axis.min)) * valueLen
+  const rightOfPlot = chart.legend ? legendWidth + 8 : size
+  const overPlot = size * 0.8 + (hasTitle && chart.titlePosition === 'top' ? headSize * 1.6 : 0)
+  // Along the groups: the brackets take room along the values only, so the groups' spacing is known before they're stacked.
+  const groupLen = horizontal ? Math.max(chart.height - overPlot - bottom, 20) : Math.max(chart.width - left - rightOfPlot, 20)
   const band = groupLen / Math.max(chart.groups.length, 1)
   /** Where a group's middle sits along the plot's upright width. */
   const x = (i: number) => band * (i + 0.5)
+
+  const brackets = bracketRows(pairs, { size, rowStep, horizontal, dots: chart.colouredBrackets, x })
+  const bracketRowCount = Math.max(0, ...brackets.map((b) => b.row + 1))
+  // Lying down, the outermost labels read on past their row.
+  const labelReach = horizontal ? Math.max(0, ...brackets.map((b) => (b.row + 0.35) * rowStep + LABEL_SIDE * size + b.width)) : 0
+  const bracketRoom = bracketRowCount > 0 ? Math.max(bracketRowCount * rowStep + size, labelReach + size * 0.5) : 0
+  const right = rightOfPlot + (horizontal ? bracketRoom : 0)
+  const top = overPlot + (horizontal ? 0 : bracketRowCount * rowStep)
+  const w = horizontal ? Math.max(chart.width - left - right, 20) : groupLen
+  const h = horizontal ? groupLen : Math.max(chart.height - top - bottom, 20)
+  // Along the values.
+  const valueLen = horizontal ? w : h
+  /** Where a value sits along the plot's upright height (0 at the top). */
+  const y = (value: number) => valueLen - ((Math.min(Math.max(value, axis.min), axis.max) - axis.min) / (axis.max - axis.min)) * valueLen
   const half = (band * Math.min(Math.max(chart.barWidth, 0.1), 0.95)) / 2
   const cap = kind === 'line' || kind === 'slope' ? columnHalf('line', half) : Math.min(half * 0.5, 6)
 
@@ -602,7 +664,7 @@ export function drawChart(source: ChartData, measure: Measure = roughMeasure): C
   // puts stars over the group alone.
   for (const b of brackets) {
     const by = -(b.row + 0.35) * rowStep
-    const drop = size * 0.35
+    const drop = size * FOOT_DROP
     const x1 = x(b.a)
     const x2 = x(b.b)
     const middle = (x1 + x2) / 2
@@ -611,7 +673,7 @@ export function drawChart(source: ChartData, measure: Measure = roughMeasure): C
       v.lines.push({ x1, y1: by, x2, y2: by, colour: ink, width: 1 })
       v.lines.push({ x1: x2, y1: by, x2, y2: by + drop, colour: ink, width: 1 })
       // With coloured brackets, a dot in each group's colour at each foot shows which two are compared.
-      if (chart.colouredBrackets) for (const [foot, group] of [[x1, b.a], [x2, b.b]] as const) v.dots.push({ x: foot, y: by + drop + size * 0.3, r: size * 0.3, fill: groupColour(chart, group), stroke: '#ffffff' })
+      if (chart.colouredBrackets) for (const [foot, group] of [[x1, b.a], [x2, b.b]] as const) v.dots.push({ x: foot, y: by + drop + size * FOOT_DOT, r: size * FOOT_DOT, fill: groupColour(chart, group), stroke: '#ffffff' })
     }
     starTexts.push({ text: stars(b.p), x: middle, y: by })
   }
@@ -637,8 +699,8 @@ export function drawChart(source: ChartData, measure: Measure = roughMeasure): C
   // A bracket's stars sit over its middle, or beside it when it stands at the plot's right.
   for (const t of starTexts) {
     const at = map(t.x, t.y)
-    if (horizontal) text({ text: t.text, x: at.x + size * 0.35, y: at.y + size * 0.35, anchor: 'start', role: { kind: 'stats' } })
-    else text({ text: t.text, x: at.x, y: at.y - size * 0.2, anchor: 'middle', role: { kind: 'stats' } })
+    if (horizontal) text({ text: t.text, x: at.x + size * LABEL_SIDE, y: at.y + size * 0.35, anchor: 'start', role: { kind: 'stats' } })
+    else text({ text: t.text, x: at.x, y: at.y - size * LABEL_LIFT, anchor: 'middle', role: { kind: 'stats' } })
   }
 
   if (chart.legend)

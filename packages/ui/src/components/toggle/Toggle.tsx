@@ -15,6 +15,11 @@
  * the on slot always show, and the white tab slides over the one that holds
  * (owner's call, 2026-11-17).
  *
+ * The `bar` variant shows that fat bar everywhere, desktop and phone, across
+ * the whole width it is given, for a setting that is easy to miss as a small
+ * switch. `offIcon` and `onIcon` replace the X and the tick (for example a
+ * "no text" and a "text" icon); give them their own size, e.g. `size-4`.
+ *
  * Built on Base UI's Switch.
  */
 import { Switch } from '@base-ui/react/switch'
@@ -34,8 +39,12 @@ export type ToggleProps = {
   checked?: boolean
   defaultChecked?: boolean
   onCheckedChange?: (checked: boolean) => void
-  /** `switch` (the default) or an Off | On pair. */
-  variant?: 'switch' | 'segmented'
+  /** `switch` (the default), an Off | On pair, or the fat `bar` (everywhere, not only in a phone's sheet). */
+  variant?: 'switch' | 'segmented' | 'bar'
+  /** `bar` only: shown in place of the X. */
+  offIcon?: ReactNode
+  /** `bar` only: shown in place of the tick. */
+  onIcon?: ReactNode
   disabled?: boolean
   name?: string
   className?: string
@@ -49,16 +58,30 @@ export function Toggle({
   defaultChecked,
   onCheckedChange,
   variant = 'switch',
+  offIcon,
+  onIcon,
   disabled,
   name,
   className,
 }: ToggleProps) {
   const id = useId()
-  const fat = useExpandedControls() && variant === 'switch'
+  const stretched = variant === 'bar'
+  const expanded = useExpandedControls()
+  const fat = stretched || (expanded && variant === 'switch')
+  const off = offIcon ?? <X className="size-4" strokeWidth={2.25} />
+  const on = onIcon ?? <Check className="size-4" strokeWidth={2.25} />
   const descriptionId = `${id}-description`
 
   return (
-    <div className={cn('flex min-w-0 items-center gap-2', hideLabel ? (fat ? 'h-11' : 'h-(--control-height)') : 'justify-between', className)}>
+    <div
+      className={cn(
+        'flex min-w-0 gap-2',
+        // A bar with a visible label stacks the label over the bar, so neither squeezes the other.
+        stretched && !hideLabel ? 'flex-col items-stretch gap-1' : 'items-center',
+        hideLabel ? (fat ? 'h-11' : 'h-(--control-height)') : !(stretched && !hideLabel) && 'justify-between',
+        className,
+      )}
+    >
       <div className={cn('flex min-w-0 flex-col', hideLabel && 'sr-only')}>
         {/* When not available only the control fades; the words stay readable, so the help line can say why. */}
         <label
@@ -88,7 +111,8 @@ export function Toggle({
           'group/toggle relative inline-flex shrink-0 items-center select-none',
           'transition-[background-color,border-color,color] duration-(--duration-fast)',
           'data-disabled:cursor-not-allowed data-disabled:opacity-50',
-          fat && 'h-11 w-24 overflow-hidden rounded-xl bg-muted p-[5px] ring-1 ring-border ring-inset data-checked:bg-primary-subtle',
+          fat && (stretched ? 'w-full' : 'w-24'),
+          fat && 'h-11 overflow-hidden rounded-xl bg-muted p-[5px] ring-1 ring-border ring-inset data-checked:bg-primary-subtle',
           variant === 'switch' && !fat && [
             'h-4 w-7 rounded-full border border-input-border bg-muted p-px',
             'data-checked:border-primary data-checked:bg-primary not-data-disabled:hover:border-input-border-hover',
@@ -99,15 +123,24 @@ export function Toggle({
         {fat ? (
           <>
             {/* Both slots always show their icon; the tab covers the one that holds, showing it again on white. */}
-            <span aria-hidden="true" className="absolute inset-y-[5px] left-[5px] grid w-[2.875rem] place-items-center text-muted-foreground">
-              <X className="size-4" strokeWidth={2.25} />
+            <span aria-hidden="true" className={cn('absolute inset-y-[5px] left-[5px] grid place-items-center text-muted-foreground', stretched ? 'w-[calc(50%-5px)]' : 'w-[2.875rem]')}>
+              {off}
             </span>
-            <span aria-hidden="true" className="absolute inset-y-[5px] right-[5px] grid w-[2.875rem] place-items-center text-primary-subtle-foreground">
-              <Check className="size-4" strokeWidth={2.25} />
+            <span aria-hidden="true" className={cn('absolute inset-y-[5px] right-[5px] grid place-items-center text-primary-subtle-foreground', stretched ? 'w-[calc(50%-5px)]' : 'w-[2.875rem]')}>
+              {on}
             </span>
-            <Switch.Thumb className="relative grid h-full w-[2.875rem] place-items-center rounded-[9px] bg-white text-[rgb(24_24_27)] shadow-sm transition-transform duration-(--duration-fast) ease-standard data-checked:translate-x-10 data-checked:text-primary">
-              <X aria-hidden="true" className="size-4 group-data-checked/toggle:hidden" strokeWidth={2.25} />
-              <Check aria-hidden="true" className="hidden size-4 group-data-checked/toggle:block" strokeWidth={2.25} />
+            <Switch.Thumb
+              className={cn(
+                'relative grid h-full place-items-center rounded-[9px] bg-white text-[rgb(24_24_27)] shadow-sm transition-transform duration-(--duration-fast) ease-standard data-checked:text-primary',
+                stretched ? 'w-1/2 data-checked:translate-x-full' : 'w-[2.875rem] data-checked:translate-x-10',
+              )}
+            >
+              <span aria-hidden="true" className="contents group-data-checked/toggle:hidden">
+                {off}
+              </span>
+              <span aria-hidden="true" className="hidden group-data-checked/toggle:contents">
+                {on}
+              </span>
             </Switch.Thumb>
           </>
         ) : variant === 'switch' ? (

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { renameChartText } from './chart-label-editor'
-import { chartSizeForPage, chartSvg, createChart, drawChart, moveGroup, parseNumber, parsePasted, pasteInto, removeRow, setValue, errorBounds, stats, withDefaults, yAxis, yLabel, type ChartData } from './chart-model'
+import { chartSizeForPage, chartSvg, createChart, drawChart, roughMeasure, moveGroup, parseNumber, parsePasted, pasteInto, removeRow, setValue, errorBounds, stats, withDefaults, yAxis, yLabel, type ChartData } from './chart-model'
 
 describe('pasting chart data', () => {
   it('reads a block from Excel or Google Sheets, with group names from the first row', () => {
@@ -139,6 +139,48 @@ describe('significance brackets', () => {
     const feet = (c: ChartData) => drawChart(c).dots.filter((dot) => dot.stroke).map((dot) => dot.fill)
     expect(feet(chart)).toEqual(expect.arrayContaining([chart.colours[0], chart.colours[1]]))
     expect(feet({ ...chart, colouredBrackets: false })).toEqual([])
+  })
+
+  /** Groups far apart, so every pair differs; `showNs` draws a bracket for every pair either way. */
+  const spread = (kind: ChartData['kind'], count: number, test: ChartData['test']): ChartData => ({
+    ...createChart(kind, 'sd'),
+    groups: Array.from({ length: count }, (_, i) => ({ name: `G${i + 1}`, values: Array.from({ length: 12 }, (_, j) => 1 + i * 0.6 + ((j % 5) - 2) * 0.05) })),
+    test,
+    showNs: true,
+  })
+
+  /** Each significance label that a line or a foot dot of another bracket runs over. */
+  const covered = (chart: ChartData) => {
+    const d = drawChart(chart)
+    const overlaps = (a: { x1: number; y1: number; x2: number; y2: number }, b: typeof a) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2
+    // The bracket lines and foot dots sit outside the plot.
+    const outside = (x: number, y: number) => (d.horizontal ? x > d.plot.left + d.plot.width + 0.5 : y < d.plot.top - 0.5)
+    const marks = [
+      ...d.lines.filter((l) => outside(Math.max(l.x1, l.x2), Math.min(l.y1, l.y2))).map((l) => ({ x1: Math.min(l.x1, l.x2) - 0.5, y1: Math.min(l.y1, l.y2) - 0.5, x2: Math.max(l.x1, l.x2) + 0.5, y2: Math.max(l.y1, l.y2) + 0.5 })),
+      ...d.dots.filter((dot) => dot.stroke && outside(dot.x, dot.y)).map((dot) => ({ x1: dot.x - dot.r, y1: dot.y - dot.r, x2: dot.x + dot.r, y2: dot.y + dot.r })),
+    ]
+    return d.texts
+      .filter((t) => t.role.kind === 'stats')
+      .filter((t) => {
+        // The glyphs: stars and "ns" sit between the baseline and about three quarters of the size above it.
+        const width = roughMeasure(t.text, t.size, t.font)
+        const left = t.anchor === 'start' ? t.x : t.x - width / 2
+        const label = { x1: left, y1: t.y - t.size * 0.75, x2: left + width, y2: t.y }
+        return marks.some((m) => overlaps(m, label))
+      })
+      .map((t) => t.text)
+  }
+
+  it('keeps every Tukey label clear of the brackets above it on a four-group bar chart', () => {
+    // The bug: the middle of a bracket over three groups is a group, where a bracket one row up put its foot and dot.
+    expect(covered(spread('bar', 4, 'anova'))).toEqual([])
+  })
+
+  it('keeps labels clear for each multiple-comparison test, group count and orientation', () => {
+    for (const kind of ['bar', 'bar-h'] as const)
+      for (const test of ['anova', 'control', 'kruskal', 'welchanova'] as const)
+        for (const count of [3, 4, 6, 8])
+          for (const colouredBrackets of [true, false]) expect(covered({ ...spread(kind, count, test), colouredBrackets }), `${kind} ${test} ${count} groups`).toEqual([])
   })
 })
 

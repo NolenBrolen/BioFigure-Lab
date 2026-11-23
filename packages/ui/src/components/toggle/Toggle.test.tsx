@@ -58,3 +58,37 @@ describe.each(['switch', 'segmented'] as const)('Toggle (%s)', (variant) => {
     expect(screen.getByText('Transparent background').closest('[class*="opacity-"]')).toBeNull()
   })
 })
+
+describe('Toggle (bar)', () => {
+  it('switches by click and by Space, and reports it', async () => {
+    const onCheckedChange = vi.fn()
+    const { user } = setup(<Toggle variant="bar" label="Show text" onCheckedChange={onCheckedChange} />)
+    const toggle = screen.getByRole('switch', { name: 'Show text' })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(onCheckedChange).toHaveBeenLastCalledWith(true)
+    await user.keyboard(' ')
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(onCheckedChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('shows a visible label above the bar, and still names the switch for screen readers', () => {
+    setup(<Toggle variant="bar" label="Show text" />)
+    const label = screen.getByText('Show text')
+    const toggle = screen.getByRole('switch', { name: 'Show text' })
+    expect(label).toBeVisible()
+    const row = toggle.parentElement!
+    expect(row).toContainElement(label)
+    expect(row.className).toContain('flex-col')
+    expect(toggle.className).toContain('w-full')
+  })
+
+  it('shows its own off and on icons in place of the X and the tick', () => {
+    setup(<Toggle variant="bar" label="Show text" offIcon={<svg data-testid="no-text" />} onIcon={<svg data-testid="text" />} />)
+    expect(screen.getAllByTestId('no-text').length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId('text').length).toBeGreaterThan(0)
+    const toggle = screen.getByRole('switch', { name: 'Show text' })
+    expect(toggle.querySelector('svg.lucide-x, svg.lucide-check')).toBeNull()
+  })
+})

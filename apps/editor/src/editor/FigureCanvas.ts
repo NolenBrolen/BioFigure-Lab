@@ -34,7 +34,7 @@ import type { LayerItem } from '@biofigure-lab/ui/components/layers-panel/Layers
 
 import { PASTE_OFFSET_PX, SNAP_DISTANCE_PX, align, distribute, marginBox, snap, snapPoint, snapResize, touchesMargin, type AlignEdge, type Axis, type Box, type Guide, type Move, type Side } from './arrange'
 
-import { BRACKETS, CORNER_SHAPES, DOUBLE_BRACKETS, OPEN_SHAPES, SHAPES, defaultCornerRadius, routePoints, shapePath, type ArrowLook, type ShapeKind } from '@biofigure-lab/ui/lib/arrow-geometry'
+import { BRACKETS, CORNER_SHAPES, DOUBLE_BRACKETS, OPEN_SHAPES, SHAPES, defaultCornerRadius, headSize, routePoints, shapePath, type ArrowLook, type ShapeKind } from '@biofigure-lab/ui/lib/arrow-geometry'
 
 import { DRAG_THRESHOLD_PX, HIT_TOLERANCE_PX, cornerCursor, distance, rotateCursor, distanceToPolygon, distanceToSegment, type XY } from './geometry'
 import { History } from './history'
@@ -46,8 +46,9 @@ import { AngleTip } from './angle-tip'
 import { DEFAULT_CHOICE, pressOnObject, shapeAt, shapeFromDrag, toolAfterPlacing, type DrawChoice, type ShapeSpec, type ShapeStyle, type Tool } from './shapes'
 import { Connector, END_HANDLE_SIZE_PX, MOVE_END_ACTION, type ArrowEndSnapper } from './Connector'
 import { DEFAULT_FONT, fontByName, fontStack, loadFontFace } from './fonts'
+import { IconTextEditor, hasSlotText, hitsSlot, iconOriginFromSvg, needsIconOrigin, noteIconOrigin, refreshSlotText, setIconOrigin, slotInfo, startSlotText } from './icon-text'
 import { applyTextStyle, drawnWeight, insertSymbol, selectedCharsBox, readTextStyle, restoreText, snapshotText, textFaces, type TextSnapshot, type TextStyle } from './text-style'
-import { attachTargetAt, followEnds, type Frame } from './connectors'
+import { ANCHOR_GAP, attachTargetAt, followEnds, sideNormal, sidePoint, type ConnectorEnd, type Frame, type Side as AnchorSide } from './connectors'
 import { CellEditor } from './CellEditor'
 import { DEFAULT_TEXT_FIT, OUTSIDE_TEXT, ShapeTextEditor, changeTextFit, fitWhileResizing, growToFit, hitsLabel, hitsBracketTextArea, hitsDoubleBracketArms, bracketTextArea, isShapeTextBox, labelBox, labelCorners, labelFromText, labelOf, labelScale, labelText, lookFor, restyleLabel, startingLabel, textFitOf, textOfLabel, textShapeOf, type ShapeLabel, type TextFit } from './shape-text'
 import { ALL_HANDLES, CHART_HANDLE, ChartObject } from './ChartObject'
@@ -241,9 +242,10 @@ classRegistry.setClass(Arrow)
  * Our own object properties that saving, undo and copying keep: a label, which
  * library icon it is, its layer id and lock, an id that arrows use to stick to
  * it, which shape from the Shapes panel it is, a shape's text and how it fits,
- * and an icon's colour mode with the colours it shows in RGB.
+ * and an icon's colour mode with the colours it shows in RGB, and the text of
+ * an icon's text slot with where the icon's origin sits on its grid (icon-text.ts).
  */
-const OWN_PROPERTIES = ['name', 'iconId', 'layerId', 'locked', 'figureId', 'shapeKind', 'cornerRadius', 'label', 'textFit', 'growLimit', 'baseWeight', 'colourMode', 'baseColours']
+const OWN_PROPERTIES = ['name', 'iconId', 'layerId', 'locked', 'figureId', 'shapeKind', 'cornerRadius', 'label', 'textFit', 'growLimit', 'baseWeight', 'colourMode', 'baseColours', 'slotText', 'slotShown', 'iconOrigin']
 
 export class FigureGroup extends Group {
   static type = 'FigureGroup'
@@ -264,6 +266,52 @@ const frameOf = (object: FabricObject): Frame => ({
   height: object.height + object.strokeWidth,
   round: object instanceof Ellipse || ['ellipse', 'circle', 'cell'].includes((object as Own).shapeKind ?? ''),
 })
+
+/**
+ * Where an anchor is on screen and the way it points out of its object, both
+ * in screen pixels. The drawing and the hit test both start from this, so what
+ * you see is what you hit.
+ */
+function anchorOnScreen(frame: Frame, side: AnchorSide, vpt: Canvas['viewportTransform']): { at: XY; out: XY } {
+  const spot = sidePoint(frame, side, ANCHOR_GAP)
+  const normal = sideNormal(frame, side)
+  const [x, y] = [vpt[0] * normal.x + vpt[2] * normal.y, vpt[1] * normal.x + vpt[3] * normal.y]
+  const length = Math.hypot(x, y) || 1
+  return { at: { x: vpt[0] * spot.x + vpt[2] * spot.y + vpt[4], y: vpt[1] * spot.x + vpt[3] * spot.y + vpt[5] }, out: { x: x / length, y: y / length } }
+}
+
+/**
+ * One anchor marker in screen pixels: a tiny arrow that starts at the spot
+ * where an arrow end will sit and points outward along `out`. The active one
+ * is 1.5 times bigger, with a soft halo behind it.
+ */
+function drawAnchorMarker(ctx: CanvasRenderingContext2D, at: XY, out: XY, active: boolean): void {
+  const k = active ? ANCHOR_ACTIVE_SCALE : 1
+  const across = { x: -out.y, y: out.x }
+  // A point `along` the way out and `side` across it, in marker pixels.
+  const pt = (along: number, side: number): XY => ({ x: at.x + (out.x * along + across.x * side) * k, y: at.y + (out.y * along + across.y * side) * k })
+  const polygon = (points: XY[]) => {
+    ctx.beginPath()
+    points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+  }
+  ctx.fillStyle = ANCHOR_COLOUR
+  ctx.strokeStyle = ANCHOR_COLOUR
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  if (active) {
+    const centre = pt(ANCHOR_ARROW_LENGTH_PX / 2, 0)
+    ctx.globalAlpha = 0.2
+    ctx.beginPath()
+    ctx.arc(centre.x, centre.y, ANCHOR_HALO_RADIUS_PX, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.globalAlpha = 1
+  }
+  ctx.lineWidth = 2 * k
+  polygon([pt(0, 0), pt(ANCHOR_SHAFT_PX, 0)])
+  ctx.stroke()
+  polygon([pt(ANCHOR_ARROW_LENGTH_PX, 0), pt(ANCHOR_SHAFT_PX, -3), pt(ANCHOR_SHAFT_PX, 3)])
+  ctx.fill()
+}
 
 /** Lines and arrows: you click on the line itself, not their whole box, until they're selected. */
 const isLineLike = (object: FabricObject) => object instanceof Line || object instanceof Connector
@@ -404,11 +452,43 @@ let clipboard: FabricObject | undefined
 /** Colour of the snapping guide lines: stands apart from the blue selection. */
 const GUIDE_COLOUR = '#e11d48'
 
+/** The arrow anchors' blue, and their sizes, all in screen pixels (the same at every zoom). */
+const ANCHOR_COLOUR = '#2563eb'
+/** The marker: a 6 px shaft and a head, 10 px in all; 1.5 times that while active. */
+const ANCHOR_SHAFT_PX = 6
+const ANCHOR_ARROW_LENGTH_PX = 10
+const ANCHOR_ACTIVE_SCALE = 1.5
+const ANCHOR_HALO_RADIUS_PX = 9
+/** The pointer picks an anchor within this of the middle of its marker as drawn when active (half its length) plus some slack, so the whole marker, tip included, can be pressed. */
+const ANCHOR_REACH_PX = (ANCHOR_ARROW_LENGTH_PX * ANCHOR_ACTIVE_SCALE) / 2 + 5
+/** How far outside the object the active object's outline sits. */
+const ANCHOR_OUTLINE_GAP_PX = 3
+
+/** What an arrow end would attach to: the object and where it is, and the side only when the pointer is on one of its anchor dots (over its body, there is no side). */
+type AnchorHover = { id: string; side?: AnchorSide; frame: Frame }
+
 /** How far in from the page edge the margin snap lines sit, in mm. */
 const SNAP_MARGIN_MM = 4
 
 /** The page margin for snapping, in page pixels. */
 const snapMarginPx = () => mmToPx(SNAP_MARGIN_MM)
+
+/** How far from an arrow's drawn path a press still picks it, in screen pixels (more forgiving than other objects, since arrows are thin). */
+const ARROW_HIT_PX = 8
+
+/**
+ * Whether a page point is on an arrow: within ARROW_HIT_PX of its drawn path
+ * (the same on screen at any zoom), and around its heads, which are wider than
+ * the line. The empty inside of a U or elbow, or the arrow's box, doesn't count.
+ */
+function arrowHit(arrow: Connector, point: XY, zoom: number): boolean {
+  const reach = ARROW_HIT_PX / zoom
+  const along = distanceToObject(arrow, point)
+  if (along <= reach) return true
+  const head = headSize(arrow.strokeWidth)
+  const nearEnd = arrow.pagePoints().some((end) => Math.hypot(end.x - point.x, end.y - point.y) <= head)
+  return nearEnd && along <= reach + head * 0.7
+}
 
 /**
  * How far a point is from what you see of an object, in page pixels: 0 on it.
@@ -418,7 +498,7 @@ function distanceToObject(object: FabricObject, point: XY): number {
   if (object instanceof Connector) {
     // Worked out in the arrow's own frame and turned onto the page, so turned corner arrows count right.
     const matrix = object.calcTransformMatrix()
-    const own = routePoints({ x: object.x1, y: object.y1 }, { x: object.x2, y: object.y2 }, object.route)
+    const own = routePoints({ x: object.x1, y: object.y1 }, { x: object.x2, y: object.y2 }, object.route, object.ownDirs())
     const path = own.map((p) => util.transformPoint(new Point(p.x, p.y), matrix))
     const nearest = Math.min(...path.slice(1).map((p, i) => distanceToSegment(point, path.at(i)!, p)))
     return Math.max(0, nearest - object.strokeWidth / 2)
@@ -453,6 +533,8 @@ class FigureFabricCanvas extends Canvas {
 
   /** Snaps a dragged arrow end (see `ArrowEndSnapper` in Connector). */
   snapArrowEnd: ArrowEndSnapper | undefined
+  /** Set by the editor: whether a page point is on an arrow anchor marker (those presses start an arrow). */
+  inAnchorMarker: ((point: XY) => boolean) | undefined
 
   /** The page's white background, with the grid on top of it when it's on (never exported). */
   _renderBackground(ctx: CanvasRenderingContext2D): void {
@@ -477,6 +559,7 @@ class FigureFabricCanvas extends Canvas {
 
   _checkTarget(object: FabricObject, point: Point): boolean {
     if (!object.visible || !object.evented) return false
+    if (object instanceof Connector && !(object === this._activeObject && !this.skipTargetFind)) return arrowHit(object, point, this.getZoom())
     // A selected line or arrow can be grabbed anywhere in its box, like other objects.
     if (object === this._activeObject && isLineLike(object)) return distanceToPolygon(point, object.getCoords()) <= HIT_TOLERANCE_PX / this.getZoom()
     const kind = kindOf(object)
@@ -495,7 +578,10 @@ class FigureFabricCanvas extends Canvas {
   findTarget(e: TPointerEvent): ReturnType<Canvas['findTarget']> {
     const active = this._activeObject
     if (!this._targetInfo && this.skipTargetFind && active instanceof Connector && !active.group) {
-      const onIt = active.findControl(this.getViewportPoint(e)) || this._checkTarget(active, this.getScenePoint(e))
+      const control = active.findControl(this.getViewportPoint(e))
+      // A press on an anchor marker starts a new arrow, even inside the selected arrow's box (but its end handles still win).
+      const zone = this.inAnchorMarker?.(this.getScenePoint(e)) === true
+      const onIt = control ? control.key === 'p1' || control.key === 'p2' || !zone : !zone && arrowHit(active, this.getScenePoint(e), this.getZoom())
       if (onIt) return { target: active, currentTarget: active, subTargets: [], currentSubTargets: [] }
     }
     return super.findTarget(e)
@@ -549,6 +635,8 @@ export type SelectionInfo = {
   colourMode?: ColourMode
   /** For one icon from the library: its library id, e.g. "small-molecules/caffeine-skeletal". */
   iconId?: string
+  /** For one icon with a text slot: the text typed for it and whether it shows; null for an icon without a slot. */
+  slot?: { text: string; shown: boolean } | null
   /** For one shape: which one from the Shapes panel (also for rectangles and ellipses from their own tools). */
   shapeKind?: ShapeKind
   /** For one shape with straight sides: how round its corners are, in page pixels. */
@@ -696,8 +784,18 @@ export class FigureCanvas {
   private chartChoice: { kind: ChartKind; errorBars: ErrorBars } = { kind: 'bar', errorBars: 'sd' }
   private readonly cells: CellEditor
   private readonly shapeText: ShapeTextEditor
+  private readonly iconText: IconTextEditor
   /** What the arrow being drawn is stuck to at its start. */
   private drawingAttach: string | undefined
+  private drawingSide: AnchorSide | undefined
+  /** Set when a lone arrow is pressed to be dragged: where, and whether the pointer has moved far enough yet to count as a drag. */
+  private dragGate: { arrow: Connector; press: XY; left: number; top: number; passed: boolean } | undefined
+  /** The object and anchor under the pointer while an arrow is drawn or an arrow end is dragged. */
+  private anchorHover: AnchorHover | undefined
+  /** An existing arrow's end is being dragged: the anchors show, as with the arrow tool. */
+  private endDragging = false
+  /** Where the last dragged arrow end was put, and the anchor it snapped to, for when it is let go. */
+  private lastEndSnap: { point: XY; hover: AnchorHover | undefined } | undefined
   private listeners = new Set<(state: CanvasState) => void>()
   /** Edges of the objects that aren't being dragged, worked out once per drag. */
   private snapTargets: Box[] | undefined
@@ -731,6 +829,7 @@ export class FigureCanvas {
       stopContextMenu: false,
     })
     this.canvas.snapArrowEnd = (point, arrow, e) => this.snapArrowEnd(point, arrow, e)
+    this.canvas.inAnchorMarker = (point) => this.tool === 'arrow' && this.anchorAt(point)?.side !== undefined
     this.angleTip = new AngleTip(this.canvas.wrapperEl)
     this.history = new History(this.serialize())
     this.cells = new CellEditor(this.canvas, () => this.commit(), () => this.emit())
@@ -740,6 +839,7 @@ export class FigureCanvas {
       () => this.commit(),
       () => this.emit(),
     )
+    this.iconText = new IconTextEditor(this.canvas, () => this.emit(), () => this.commit())
 
     const changed = () => this.emit()
     // A turned arrow's box squares up around it once it's no longer selected.
@@ -751,6 +851,18 @@ export class FigureCanvas {
     this.canvas.on('selection:updated', squareUp)
     this.canvas.on('selection:cleared', squareUp)
     this.canvas.on('object:moving', (event) => {
+      // A press on an arrow with a tiny wobble is a click, not a drag: the arrow stays put until the pointer has moved a real distance.
+      const gate = this.dragGate
+      if (gate && event.target === gate.arrow && !gate.passed) {
+        const pointer = this.canvas.getViewportPoint(event.e)
+        if (Math.hypot(pointer.x - gate.press.x, pointer.y - gate.press.y) < DRAG_THRESHOLD_PX) {
+          gate.arrow.set({ left: gate.left, top: gate.top })
+          gate.arrow.setCoords()
+          return
+        }
+        gate.passed = true
+        this.unstickDraggedArrows()
+      }
       this.snapWhileMoving(event)
       this.followConnectors()
       this.transforming = true
@@ -763,7 +875,14 @@ export class FigureCanvas {
       this.emit()
     })
     this.canvas.on('object:resizing', () => this.followConnectors())
-    this.canvas.on('before:transform', ({ transform }) => {
+    this.canvas.on('before:transform', ({ e, transform }) => {
+      // Dragging a lone arrow only lets go of its objects once the drag is real (see 'object:moving').
+      if (transform.action === 'drag' && transform.target instanceof Connector) {
+        const press = this.canvas.getViewportPoint(e)
+        this.dragGate = { arrow: transform.target, press: { x: press.x, y: press.y }, left: transform.target.left, top: transform.target.top, passed: false }
+        return
+      }
+      this.dragGate = undefined
       if (transform.action === 'drag' || transform.action === 'rotate') this.unstickDraggedArrows()
     })
     this.canvas.on('mouse:up', () => {
@@ -778,6 +897,7 @@ export class FigureCanvas {
     this.canvas.on('after:render', ({ ctx }) => {
       this.drawGuides(ctx)
       this.drawPickedText(ctx)
+      this.drawAnchors(ctx)
     })
     this.canvas.on('object:scaling', ({ e, target, transform }) => {
       this.snapWhileResizing(e, target, transform)
@@ -792,6 +912,10 @@ export class FigureCanvas {
       this.emit()
     })
     this.canvas.on('object:modified', ({ target, action }) => {
+      // A click on an arrow that never became a drag changes nothing and leaves no undo step.
+      const gate = this.dragGate
+      this.dragGate = undefined
+      if (action === 'drag' && gate && gate.arrow === target && !gate.passed) return
       if (action === MOVE_END_ACTION && target instanceof Connector) this.stickEnds(target)
       if (target instanceof ChartObject) target.bakeScale()
       // A shape made narrower grows taller again if its text no longer fits.
@@ -818,6 +942,11 @@ export class FigureCanvas {
       const text = target && asText(target)
       if (this.tool === 'select' && text && !text.isEditing && text.editable && !isLocked(text)) return this.startTyping(text, e)
       if (this.tool === 'select' && target && textShapeOf(target) && !isLocked(target)) return this.typeInShape(target, e)
+      if (this.tool === 'select' && target && isIcon(target) && !isLocked(target) && hitsSlot(target, scenePoint)) {
+        this.canvas.setActiveObject(target)
+        this.iconText.start(target, e)
+        return this.emit()
+      }
       if (this.tool === 'select' && target instanceof ChartObject) {
         const text = target.textAt(scenePoint)
         if (text) editChartText(this.canvas, target, text, (chart) => {
@@ -837,7 +966,6 @@ export class FigureCanvas {
       this.onPointerMove(event)
     })
     this.canvas.on('mouse:up', (event) => this.onPointerUp(event))
-
     // Every object gets its own id, so the layers panel can point at it.
     // Copies arrive with the original's id and get a new one.
     this.canvas.on('object:added', ({ target }) => this.prepareLayer(target))
@@ -864,6 +992,7 @@ export class FigureCanvas {
 
   setTool(tool: Tool): void {
     this.tool = tool
+    this.anchorHover = undefined
     this.canvas.defaultCursor = tool === 'select' ? 'default' : tool === 'text' ? 'text' : 'crosshair'
     // Arrows and lines start drawing even on top of an object (to stick to it),
     // so Fabric mustn't grab the object; the text tool handles text itself.
@@ -884,7 +1013,7 @@ export class FigureCanvas {
    */
   finishTyping(letGo = false): void {
     const active = this.canvas.getActiveObject()
-    const shape = active && isShapeTextBox(active) && !letGo ? this.shapeText.shape : undefined
+    const shape = active && isShapeTextBox(active) && !letGo ? (this.shapeText.shape ?? this.iconText.icon) : undefined
     if (active instanceof IText && active.isEditing) active.exitEditing()
     if (shape && this.canvas.getObjects().includes(shape)) this.canvas.setActiveObject(shape)
     else this.canvas.discardActiveObject()
@@ -1133,10 +1262,12 @@ export class FigureCanvas {
       objects.filter((object): object is FabricObject => object !== null),
       options,
     )
+    noteIconOrigin(group, iconId)
     const area = group.width * group.height
     group.scale(area > 0 ? size / Math.sqrt(area) : size / Math.max(group.width, group.height, 1))
     group.set({ left: centre.x - group.getScaledWidth() / 2, top: centre.y - group.getScaledHeight() / 2 })
     Object.assign(group, { name, iconId })
+    startSlotText(group, iconId)
     this.add(group)
   }
 
@@ -1182,12 +1313,14 @@ export class FigureCanvas {
     if (!(old instanceof Group) || !isIcon(old) || !next || typeof oldId !== 'string' || oldId === iconId) return
     const { objects, options } = await loadSVGFromString(next.svg)
     const group = util.groupSVGElements(objects.filter((object): object is FabricObject => object !== null), options)
+    noteIconOrigin(group, iconId)
     // The same scale keeps the drawing the same size, even where the new version reaches a little further out.
     group.set({ scaleX: old.scaleX, scaleY: old.scaleY, angle: old.angle, flipX: old.flipX, flipY: old.flipY, skewX: old.skewX, skewY: old.skewY, opacity: old.opacity })
     for (const prop of OWN_PROPERTIES) {
       const value = (old as unknown as Record<string, unknown>)[prop]
-      if (value !== undefined && prop !== 'colourMode' && prop !== 'baseColours') Object.assign(group, { [prop]: value })
+      if (value !== undefined && prop !== 'colourMode' && prop !== 'baseColours' && prop !== 'iconOrigin') Object.assign(group, { [prop]: value })
     }
+    if ((group as FabricObject & { slotText?: unknown }).slotText === undefined) startSlotText(group, iconId)
     // A renamed icon keeps its name; otherwise it takes the new version's name.
     const oldEntry = await library(oldId)
     const oldName = oldEntry?.name
@@ -1209,6 +1342,38 @@ export class FigureCanvas {
     this.canvas.insertAt(index, group)
     this.canvas.setActiveObject(group)
     this.canvas.requestRenderAll()
+    this.commit()
+  }
+
+  /**
+   * Set the text of the selected icon's text slot and whether it shows. With
+   * `save` off (typing in the field), the text changes on the page right away
+   * but becomes one undo step only when typing ends (`saveIconText`).
+   */
+  async setIconText(text: string, shown: boolean, save = true): Promise<void> {
+    const targets = this.selected().targets
+    const icon = targets.length === 1 ? targets[0] : undefined
+    if (!icon || !slotInfo(icon)) return
+    // An icon placed before it had a slot doesn't know its origin yet: read it from the library (only then does this wait).
+    if (needsIconOrigin(icon)) {
+      const svg = await loadIconSvg(iconIdOf(icon) ?? '')
+      if (svg) setIconOrigin(icon, await iconOriginFromSvg(svg))
+    }
+    Object.assign(icon, { slotText: text, slotShown: shown })
+    refreshSlotText(icon)
+    this.canvas.requestRenderAll()
+    if (save) this.commit()
+    else this.emit()
+    // The text is measured again once the font is there (usually it already is).
+    await loadFontFace(DEFAULT_FONT, 400, false)
+    if (this.abort.signal.aborted) return
+    cache.clearFontCache()
+    refreshSlotText(icon)
+    this.canvas.requestRenderAll()
+  }
+
+  /** Save the icon text typed so far as one undo step. */
+  saveIconText(): void {
     this.commit()
   }
 
@@ -1250,7 +1415,7 @@ export class FigureCanvas {
   /** The selection, with the shape being typed in standing in for the text box laid over it. */
   private selected(): { active: FabricObject | undefined; targets: FabricObject[] } {
     const active = this.canvas.getActiveObject()
-    const typedIn = active && isShapeTextBox(active) ? this.shapeText.shape : undefined
+    const typedIn = active && isShapeTextBox(active) ? (this.shapeText.shape ?? this.iconText.icon) : undefined
     return typedIn ? { active: typedIn, targets: [typedIn] } : { active, targets: this.canvas.getActiveObjects() }
   }
 
@@ -1797,7 +1962,9 @@ export class FigureCanvas {
     const objects = allObjects(this.canvas.getObjects())
     const texts = objects.filter((object) => object instanceof IText)
     const labels = objects.flatMap((object) => { const box = labelBox(object); return (box && asText(box)) ?? [] })
+    const slotted = objects.filter(hasSlotText)
     const faces = [...texts, ...labels].flatMap(textFaces)
+    if (slotted.length > 0) faces.push({ font: DEFAULT_FONT.name, weight: 400, italic: false })
     if (faces.length === 0) return
     await Promise.all(faces.map((face) => loadFontFace(fontByName(face.font) ?? DEFAULT_FONT, face.weight, face.italic)))
     if (this.abort.signal.aborted) return
@@ -1810,6 +1977,7 @@ export class FigureCanvas {
     // Shapes measure their text again when it's drawn next.
     for (const box of labels) box.initDimensions()
     for (const object of objects) if (labelBox(object)) object.set('dirty', true)
+    for (const icon of slotted) refreshSlotText(icon)
     this.canvas.requestRenderAll()
   }
 
@@ -1886,6 +2054,7 @@ export class FigureCanvas {
   setPage(page: { width: number; height: number }, fit = true): History {
     this.cells.finish()
     this.shapeText.finish()
+    this.iconText.finish()
     this.canvas.discardActiveObject()
     if (fit) {
       fitObjects(this.canvas.getObjects(), this.page, page)
@@ -1916,6 +2085,7 @@ export class FigureCanvas {
     this.angleTip.dispose()
     this.cells.finish()
     this.shapeText.finish()
+    this.iconText.finish()
     this.abort.abort()
     this.listeners.clear()
     return this.canvas.dispose()
@@ -2103,11 +2273,20 @@ export class FigureCanvas {
   private snapArrowEnd(point: XY, arrow: FabricObject, e: TPointerEvent): XY {
     if (e.altKey) {
       this.guides = []
-      return point
+      return this.snapToAnchor(point, point)
     }
     const result = snapPoint(point, this.snapTargetsFor(arrow), this.pageBox, SNAP_DISTANCE_PX / this.zoom, this.canvas.grid)
     this.guides = result.guides
-    return result
+    return this.snapToAnchor(point, result)
+  }
+
+  /** While an arrow end is dragged: show the anchors, and put the end on the side whose dot is under the pointer. */
+  private snapToAnchor(pointer: XY, snapped: XY): XY {
+    this.endDragging = true
+    const hover = this.hoverAnchors(pointer)
+    const point = hover?.side ? sidePoint(hover.frame, hover.side, ANCHOR_GAP) : snapped
+    this.lastEndSnap = { point, hover }
+    return { x: point.x, y: point.y }
   }
 
   /** The angle while rotating, in a small pill beside the pointer. */
@@ -2118,6 +2297,11 @@ export class FigureCanvas {
 
   private endSnapping(): void {
     this.snapTargets = undefined
+    if (this.endDragging) {
+      this.endDragging = false
+      this.anchorHover = undefined
+      this.canvas.requestRenderAll()
+    }
     if (this.guides.length === 0) return
     this.guides = []
     this.canvas.requestRenderAll()
@@ -2153,6 +2337,96 @@ export class FigureCanvas {
   private textPickedIn(): FabricObject | undefined {
     const shape = this.pickedText
     return shape && this.canvas.getActiveObject() === shape && this.shapeText.shape !== shape ? shape : undefined
+  }
+
+  /** True while the arrow anchors show: with the arrow tool (unless typing), or while an arrow end is dragged. */
+  private showingAnchors(): boolean {
+    return this.endDragging || (this.tool === 'arrow' && !this.shapeText.shape)
+  }
+
+  /**
+   * The object an arrow end at this point would attach to. A point within
+   * reach of an object's anchor dot picks that object and that side. A point
+   * over an object's body picks the object but no side (the arrow then
+   * attaches the way it did before sides: on the edge facing its other end).
+   * `skip` is an object that can't be picked (the one the arrow starts at).
+   */
+  private anchorAt(point: XY, skip?: string): AnchorHover | undefined {
+    const objects = this.canvas.getObjects().filter((object) => object.visible && !(object instanceof Connector) && idOf(object) && idOf(object) !== skip)
+    const candidates = objects.map((object) => ({ id: idOf(object)!, frame: frameOf(object) }))
+    // Measured on screen, to the middle of each marker as drawn, so pressing anywhere on a marker (its tip too) picks it at every zoom.
+    const vpt = this.canvas.viewportTransform
+    const pointer = { x: vpt[0] * point.x + vpt[2] * point.y + vpt[4], y: vpt[1] * point.x + vpt[3] * point.y + vpt[5] }
+    let best: (AnchorHover & { distance: number }) | undefined
+    for (const { id, frame } of candidates.toReversed()) {
+      for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+        const { at, out } = anchorOnScreen(frame, side, vpt)
+        const middle = ANCHOR_ARROW_LENGTH_PX / 2
+        const distance = Math.hypot(at.x + out.x * middle - pointer.x, at.y + out.y * middle - pointer.y)
+        if (distance <= ANCHOR_REACH_PX && (!best || distance < best.distance)) best = { id, side, frame, distance }
+      }
+    }
+    if (best) return { id: best.id, side: best.side, frame: best.frame }
+    const over = attachTargetAt(point, candidates)
+    const found = candidates.find((candidate) => candidate.id === over)
+    return found && { id: found.id, frame: found.frame }
+  }
+
+  /** Point the anchors at what is under the pointer; redraw only when that changed. */
+  private hoverAnchors(point: XY, skip?: string): AnchorHover | undefined {
+    const hover = this.showingAnchors() ? this.anchorAt(point, skip) : undefined
+    if (hover?.id !== this.anchorHover?.id || hover?.side !== this.anchorHover?.side) {
+      this.anchorHover = hover
+      this.canvas.requestRenderAll()
+    }
+    return hover
+  }
+
+  /**
+   * The arrow anchors, in screen pixels like the guides: a small marker
+   * outside the middle of each side of every object an arrow can stick to,
+   * pointing outward (a tiny arrow), at the spot where
+   * an arrow end on that side will sit. The object under the pointer gets a
+   * thin outline, and the anchor under the pointer a bigger marker with a soft
+   * halo (none over the body). Only on screen, never in exports (those draw on
+   * another canvas, which this skips).
+   */
+  private drawAnchors(ctx: CanvasRenderingContext2D): void {
+    if (!this.showingAnchors() || ctx !== this.canvas.getContext()) return
+    const vpt = this.canvas.viewportTransform
+    const hover = this.anchorHover
+    ctx.save()
+    for (const object of this.canvas.getObjects()) {
+      if (!object.visible || object instanceof Connector || !idOf(object)) continue
+      const frame = frameOf(object)
+      const active = hover?.id === idOf(object) ? hover : undefined
+      const marker = (side: AnchorSide, big: boolean) => {
+        const { at, out } = anchorOnScreen(frame, side, vpt)
+        drawAnchorMarker(ctx, at, out, big)
+      }
+      for (const side of ['top', 'right', 'bottom', 'left'] as const) if (active?.side !== side) marker(side, false)
+      if (!active) continue
+      // The outline: the object's box (or ellipse) a few screen pixels bigger, turned with the object.
+      const screen = util.multiplyTransformMatrices(vpt, object.calcTransformMatrix())
+      const grow = (a: number, b: number) => ANCHOR_OUTLINE_GAP_PX / (Math.hypot(a, b) || 1)
+      const hw = frame.width / 2 + grow(screen[0], screen[1])
+      const hh = frame.height / 2 + grow(screen[2], screen[3])
+      const outline: XY[] = frame.round
+        ? Array.from({ length: 72 }, (_, i) => ({ x: hw * Math.cos((i / 72) * Math.PI * 2), y: hh * Math.sin((i / 72) * Math.PI * 2) }))
+        : [{ x: -hw, y: -hh }, { x: hw, y: -hh }, { x: hw, y: hh }, { x: -hw, y: hh }]
+      ctx.strokeStyle = ANCHOR_COLOUR
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      outline.forEach((corner, i) => {
+        const p = util.transformPoint(new Point(corner.x, corner.y), screen)
+        if (i === 0) ctx.moveTo(p.x, p.y)
+        else ctx.lineTo(p.x, p.y)
+      })
+      ctx.closePath()
+      ctx.stroke()
+      if (active.side) marker(active.side, true)
+    }
+    ctx.restore()
   }
 
   private drawGuides(ctx: CanvasRenderingContext2D): void {
@@ -2232,12 +2506,36 @@ export class FigureCanvas {
     // Grabbing the arrow just drawn adjusts it instead of drawing a new one.
     if (target && target === this.canvas.getActiveObject() && target instanceof Connector) return
     if (target && pressOnObject(this.tool) === 'select') return this.setTool('select')
-    const spec = shapeFromDrag(this.tool, scenePoint, scenePoint, false, this.choice)
-    this.drawingAttach = this.tool === 'arrow' ? this.attachTargetAt(scenePoint) : undefined
-    this.drawing = { start: { x: scenePoint.x, y: scenePoint.y }, object: this.addShape(spec, false) }
+    // An arrow pressed on an anchor marker starts on that side and stays attached there; pressed on an object's body, it attaches with no side.
+    const hover = this.tool === 'arrow' ? this.hoverAnchors(scenePoint) : undefined
+    // With the arrow tool, pressing an existing arrow (away from the markers) selects it, so its ends can be dragged; it draws no new one.
+    const existing = this.tool === 'arrow' && !hover?.side ? this.arrowAt(scenePoint) : undefined
+    if (existing) {
+      this.canvas.setActiveObject(existing)
+      this.canvas.requestRenderAll()
+      return this.emit()
+    }
+    const start = hover?.side ? sidePoint(hover.frame, hover.side, ANCHOR_GAP) : { x: scenePoint.x, y: scenePoint.y }
+    const spec = shapeFromDrag(this.tool, start, start, false, this.choice)
+    this.drawingAttach = hover?.id
+    this.drawingSide = hover?.side
+    const object = this.addShape(spec, false)
+    // An arrow only shows once the pointer has really moved: a click (to select something) never flashes a head.
+    if (this.tool === 'arrow') object.set({ visible: false })
+    this.drawing = { start, object }
   }
 
   private onPointerMove({ e, scenePoint }: TPointerEventInfo): void {
+    if (this.tool === 'arrow') {
+      const hover = this.hoverAnchors(scenePoint, this.drawing ? this.drawingAttach : undefined)
+      // Over an existing arrow (and not on a marker) a press selects it, so the cursor says clickable.
+      const overArrow = !this.drawing && !hover?.side && this.arrowAt(scenePoint) !== undefined
+      const cursor = overArrow ? 'pointer' : 'crosshair'
+      if (this.canvas.defaultCursor !== cursor) {
+        this.canvas.defaultCursor = cursor
+        this.canvas.setCursor(cursor)
+      }
+    }
     if (this.cellDrag) return this.dragCells(scenePoint)
     if (this.textDrag) return this.moveTextDrag(scenePoint)
     if (this.textSelecting) return this.moveTextSelecting(e)
@@ -2252,9 +2550,31 @@ export class FigureCanvas {
       this.drawing.object = this.placeTable(this.drawing.start, scenePoint, false)
       return
     }
+    // An arrow stays hidden until the drag is real, so a click shows nothing.
+    if (this.tool === 'arrow' && !this.drawing.object.visible && distance(this.drawing.start, scenePoint) * this.zoom < DRAG_THRESHOLD_PX) return
     // Redrawn from scratch on each move: simple, and fast enough for one shape.
     this.canvas.remove(this.drawing.object)
-    this.drawing.object = this.placeShape(shapeFromDrag(this.tool, this.drawing.start, scenePoint, e.shiftKey, this.choice), false)
+    // The arrow's end snaps only onto a marker's side; over an object's body it follows the pointer freely.
+    const hover = this.tool === 'arrow' ? this.anchorHover : undefined
+    const to = hover?.side ? sidePoint(hover.frame, hover.side, ANCHOR_GAP) : scenePoint
+    const preview = this.placeShape(shapeFromDrag(this.tool, this.drawing.start, to, e.shiftKey && !hover?.side, this.choice), false)
+    this.drawing.object = preview
+    // The preview is attached to the sides like the finished arrow will be, so an elbow or U shape
+    // leaves the start side and enters the end side the right way on every move, not only after release.
+    if (preview instanceof Connector) {
+      const startFrame = this.drawingAttach && this.drawingSide ? this.frameById(this.drawingAttach) : undefined
+      const [from, tip] = preview.pagePoints()
+      preview.set({
+        attachStart: startFrame && this.drawingSide ? this.drawingAttach : undefined,
+        attachStartSide: startFrame ? this.drawingSide : undefined,
+        attachEnd: hover?.side ? hover.id : undefined,
+        attachEndSide: hover?.side,
+      })
+      preview.setPagePoints(from, tip, {
+        ...(startFrame && this.drawingSide && { start: sideNormal(startFrame, this.drawingSide) }),
+        ...(hover?.side && { end: sideNormal(hover.frame, hover.side) }),
+      })
+    }
   }
 
   private onPointerUp({ scenePoint, target, isClick, e }: TPointerEventInfo & { isClick?: boolean }): void {
@@ -2307,6 +2627,7 @@ export class FigureCanvas {
     if (!this.drawing || this.tool === 'select' || this.tool === 'text') return
     const { start, object } = this.drawing
     this.drawing = undefined
+    this.anchorHover = undefined
     if (this.tool === 'chart') {
       this.canvas.remove(object)
       const chart = this.placeChart(start, distance(start, scenePoint) * this.zoom < DRAG_THRESHOLD_PX ? start : scenePoint, true)
@@ -2325,12 +2646,32 @@ export class FigureCanvas {
     }
     if (distance(start, scenePoint) * this.zoom < DRAG_THRESHOLD_PX) {
       this.canvas.remove(object)
+      // A click with the arrow tool never places an arrow. On an object it selects that object, and the
+      // arrow tool stays on (the Arrows panel is still open, so the anchors must stay too, as when an
+      // arrow is clicked); on empty page it lets go of the selection.
+      if (this.tool === 'arrow') {
+        const id = this.drawingAttach ?? this.attachTargetAt(start)
+        const picked = id ? this.canvas.getObjects().find((candidate) => idOf(candidate) === id) : undefined
+        if (picked && !isLocked(picked)) {
+          this.canvas.setActiveObject(picked)
+          this.canvas.requestRenderAll()
+          return this.emit()
+        }
+        this.canvas.discardActiveObject()
+        this.canvas.requestRenderAll()
+        return this.emit()
+      }
       this.placeShape(shapeAt(this.tool, start.x, start.y, this.choice))
     } else {
       // An arrow drawn from one object to another sticks to both.
       if (object instanceof Connector) {
-        const end = this.attachTargetAt(scenePoint)
-        object.set({ attachStart: this.drawingAttach, attachEnd: end === this.drawingAttach ? undefined : end })
+        const end = this.anchorAt(scenePoint, this.drawingAttach)
+        object.set({
+          attachStart: this.drawingAttach,
+          attachStartSide: this.drawingAttach ? this.drawingSide : undefined,
+          attachEnd: end?.id,
+          attachEndSide: end?.side,
+        })
       }
       this.canvas.setActiveObject(object)
       this.commit()
@@ -2589,6 +2930,14 @@ export class FigureCanvas {
     return { fill, stroke: table.table.lineColour, strokeWidth: table.table.lineWidth }
   }
 
+  /** The topmost arrow under a point, on its line. */
+  private arrowAt(point: XY): Connector | undefined {
+    return this.canvas
+      .getObjects()
+      .toReversed()
+      .find((object): object is Connector => object instanceof Connector && object.visible && !object.group && arrowHit(object, point, this.zoom))
+  }
+
   /** The object an arrow end let go at this point sticks to: the topmost one under it that isn't an arrow. */
   private attachTargetAt(point: XY): string | undefined {
     const candidates = this.canvas
@@ -2615,8 +2964,29 @@ export class FigureCanvas {
   /** After an end handle is dragged: the end sticks to the object it was let go over. */
   private stickEnds(arrow: Connector): void {
     const [a, b] = arrow.pagePoints()
-    arrow.set({ attachStart: arrow.attachStart ?? this.attachTargetAt(a), attachEnd: arrow.attachEnd ?? this.attachTargetAt(b) })
-    if (arrow.attachStart && arrow.attachStart === arrow.attachEnd) arrow.set({ attachEnd: undefined })
+    if (!arrow.attachStart) {
+      const at = this.attachmentAt(a)
+      arrow.set({ attachStart: at?.id, attachStartSide: at?.side })
+    }
+    if (!arrow.attachEnd) {
+      const at = this.attachmentAt(b)
+      arrow.set({ attachEnd: at?.id, attachEndSide: at?.side })
+    }
+    if (arrow.attachStart && arrow.attachStart === arrow.attachEnd) arrow.set({ attachEnd: undefined, attachEndSide: undefined })
+    this.lastEndSnap = undefined
+  }
+
+  private frameById(id: string): Frame | undefined {
+    const object = this.canvas.getObjects().find((candidate) => idOf(candidate) === id)
+    return object && frameOf(object)
+  }
+
+  /** What a dragged arrow end let go at this point attaches to: the dot it snapped to (with its side), else the object under it with no side. */
+  private attachmentAt(point: XY): { id: string; side?: AnchorSide } | undefined {
+    const snap = this.lastEndSnap
+    if (snap?.hover?.side && Math.hypot(snap.point.x - point.x, snap.point.y - point.y) < 0.5) return snap.hover
+    const id = this.attachTargetAt(point)
+    return id ? { id } : undefined
   }
 
   /** Dragging or turning an arrow unsticks the ends whose objects aren't moved along with it. */
@@ -2624,21 +2994,39 @@ export class FigureCanvas {
     const moving = allObjects(this.canvas.getActiveObjects())
     const movingIds = new Set(moving.map(idOf))
     for (const arrow of moving.filter((object) => object instanceof Connector)) {
-      if (arrow.attachStart && !movingIds.has(arrow.attachStart)) arrow.set({ attachStart: undefined })
-      if (arrow.attachEnd && !movingIds.has(arrow.attachEnd)) arrow.set({ attachEnd: undefined })
+      if (arrow.attachStart && !movingIds.has(arrow.attachStart)) arrow.set({ attachStart: undefined, attachStartSide: undefined })
+      if (arrow.attachEnd && !movingIds.has(arrow.attachEnd)) arrow.set({ attachEnd: undefined, attachEndSide: undefined })
     }
   }
 
-  /** Move every stuck arrow end to its object's edge. Arrows moved along inside a selection keep their shape. */
+  /**
+   * Move every stuck arrow end to its object: the side it was attached to,
+   * else the edge facing the other end, or for a U-shaped arrow the bottom
+   * (in the arrow's own turn). Arrows
+   * moved along inside a selection keep their shape.
+   */
   private followConnectors(): void {
+    const gap = ANCHOR_GAP
     const byId = new Map(allObjects(this.canvas.getObjects()).flatMap((object) => (idOf(object) ? [[idOf(object)!, object] as const] : [])))
     for (const arrow of this.canvas.getObjects()) {
-      if (!(arrow instanceof Connector) || arrow.group || (!arrow.attachStart && !arrow.attachEnd)) continue
-      const [a, b] = followEnds(arrow.ends(), (id) => {
+      if (!(arrow instanceof Connector) || arrow.group || (!arrow.attachStart && !arrow.attachEnd && !arrow.startDir && !arrow.endDir)) continue
+      const frameFor = (id: string) => {
         const target = byId.get(id)
         return target?.visible ? frameOf(target) : undefined
-      })
-      arrow.setPagePoints(a, b)
+      }
+      // The way each end's side faces: corner routes leave and enter along it.
+      const ends = arrow.ends()
+      // An end attached with a side takes that side's way out; attached with none, it clears it; a loose end keeps its shape as it was.
+      const normal = (end: ConnectorEnd): XY | null | undefined => {
+        const frame = end.attach ? frameFor(end.attach) : undefined
+        return frame ? (end.side ? sideNormal(frame, end.side) : null) : undefined
+      }
+      const [first, last] = [normal(ends[0]), normal(ends[1])]
+      const turn = (arrow.angle * Math.PI) / 180
+      // A U-shaped arrow dips towards a chosen side, else down; ends with no side then sit on that edge.
+      const down = arrow.route === 'u-shape' ? (first ?? last ?? { x: -Math.sin(turn), y: Math.cos(turn) }) : undefined
+      const [a, b] = followEnds(ends, frameFor, down, gap)
+      arrow.setPagePoints(a, b, { ...(first !== undefined && { start: first }), ...(last !== undefined && { end: last }) })
     }
   }
 
@@ -2657,6 +3045,7 @@ export class FigureCanvas {
   private async restore(state: string, asStart = false): Promise<void> {
     this.cells.finish()
     this.shapeText.finish()
+    this.iconText.finish()
     // Undo and redo keep what was selected, as far as it is still there, so its panels stay open.
     const selected = this.canvas.getActiveObjects().flatMap((object) => layerProps(object).layerId ?? [])
     this.restoring = true
@@ -2681,6 +3070,8 @@ export class FigureCanvas {
       applyShapeRules(object)
     }
     this.canvas.backgroundColor = '#ffffff'
+    // Corner arrows stuck to a side take their way out from the objects again.
+    this.followConnectors()
     this.canvas.requestRenderAll()
     this.restoring = false
     if (asStart) this.history = new History(this.serialize())
@@ -2747,6 +3138,7 @@ export class FigureCanvas {
       // An icon in greyscale shows the colour it has in RGB, the one the colour field changes.
       fill: kind === 'icon' ? iconMainColour(baseIconColours(first), iconIdOf(first)) : colour(painted.fill),
       ...(kind === 'icon' && { colourMode: colourModeOf(first) }),
+      ...(kind === 'icon' && objects.length === 1 && { slot: slotInfo(first) ?? null }),
       ...(kind === 'icon' && objects.length === 1 && typeof (first as FabricObject & { iconId?: unknown }).iconId === 'string' && { iconId: (first as FabricObject & { iconId: string }).iconId }),
       stroke: colour(painted.stroke),
       strokeWidth: painted.strokeWidth,
@@ -2892,7 +3284,14 @@ function giveNewIds(objects: readonly FabricObject[]): void {
     ;(object as Own).figureId = id
   }
   for (const arrow of all.filter((object) => object instanceof Connector)) {
-    arrow.set({ attachStart: arrow.attachStart && renamed.get(arrow.attachStart), attachEnd: arrow.attachEnd && renamed.get(arrow.attachEnd) })
+    const [start, end] = [arrow.attachStart && renamed.get(arrow.attachStart), arrow.attachEnd && renamed.get(arrow.attachEnd)]
+    // A side stays only with an attachment that stays.
+    arrow.set({
+      attachStart: start,
+      attachEnd: end,
+      attachStartSide: start ? arrow.attachStartSide : undefined,
+      attachEndSide: end ? arrow.attachEndSide : undefined,
+    })
   }
 }
 

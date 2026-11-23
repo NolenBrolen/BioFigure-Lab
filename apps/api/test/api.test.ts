@@ -74,6 +74,64 @@ describe("figure links", () => {
   });
 });
 
+describe("videos, served in parts", () => {
+  // The bug this guards: the assets service sent the whole file to every Range request, so Safari
+  // would not play the landing page's video.
+  const file = new Uint8Array(1000).map((_, i) => i % 256);
+  const withVideo = async (run: (asked: string[]) => Promise<void>) => {
+    const asked: string[] = [];
+    const real = env.ASSETS.fetch.bind(env.ASSETS);
+    env.ASSETS.fetch = (input) => {
+      const url = new Request(input).url;
+      asked.push(url);
+      if (!url.endsWith("/video/tour.mp4")) return Promise.resolve(new Response("missing", { status: 404 }));
+      return Promise.resolve(new Response(file, { headers: { "Content-Type": "video/mp4" } }));
+    };
+    try {
+      await run(asked);
+    } finally {
+      env.ASSETS.fetch = real;
+    }
+  };
+  const getRange = (path: string, range?: string) =>
+    exports.default.fetch(`http://example.com${path}`, range ? { headers: { Range: range } } : undefined);
+
+  it("sends the whole file, saying parts can be asked for, when no part is asked", () =>
+    withVideo(async () => {
+      const res = await getRange("/video/tour.mp4");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Accept-Ranges")).toBe("bytes");
+      expect(res.headers.get("Content-Type")).toBe("video/mp4");
+      expect((await res.arrayBuffer()).byteLength).toBe(1000);
+    }));
+
+  it("answers a part with 206 and exactly those bytes", () =>
+    withVideo(async (asked) => {
+      const res = await getRange("/video/tour.mp4", "bytes=100-199");
+      expect(res.status).toBe(206);
+      expect(res.headers.get("Content-Range")).toBe("bytes 100-199/1000");
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(file.slice(100, 200));
+      expect(asked).toEqual(["http://example.com/video/tour.mp4"]);
+    }));
+
+  it("handles open-ended and from-the-end parts", () =>
+    withVideo(async () => {
+      const tail = await getRange("/video/tour.mp4", "bytes=900-");
+      expect(tail.headers.get("Content-Range")).toBe("bytes 900-999/1000");
+      const last = await getRange("/video/tour.mp4", "bytes=-10");
+      expect(last.headers.get("Content-Range")).toBe("bytes 990-999/1000");
+      expect((await last.arrayBuffer()).byteLength).toBe(10);
+    }));
+
+  it("answers 416 for a part past the end, and passes a missing file through", () =>
+    withVideo(async () => {
+      const past = await getRange("/video/tour.mp4", "bytes=2000-");
+      expect(past.status).toBe(416);
+      expect(past.headers.get("Content-Range")).toBe("bytes */1000");
+      expect((await getRange("/video/nope.mp4", "bytes=0-1")).status).toBe(404);
+    }));
+});
+
 describe("database", () => {
   it("reads app_meta through Drizzle after the migrations", async () => {
     const db = drizzle(env.DB);

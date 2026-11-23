@@ -64,19 +64,42 @@ const fmt = (n: number) => String(Math.round(n * 100) / 100)
 const polyline = (points: readonly XY[], close = false) =>
   points.map((p, i) => `${i === 0 ? 'M' : 'L'}${fmt(p.x)} ${fmt(p.y)}`).join(' ') + (close ? ' Z' : '')
 
+/**
+ * Which way the corner routes (elbow, U-shape) leave and enter an end, when an
+ * end is attached to a chosen side of an object: the way that side faces
+ * (outward), as a unit direction along an axis in the arrow's own frame. The
+ * path leaves `a` along `start`, and comes into `b` travelling against `end`.
+ * Left out, an elbow leaves sideways and a U-shape dips down.
+ */
+export type EndDirs = { start?: XY; end?: XY }
+
 /** The arrow's path from `a` to `b` as a list of points (curves are finely sampled). */
-export function routePoints(a: XY, b: XY, route: Route): XY[] {
+export function routePoints(a: XY, b: XY, route: Route, dirs?: EndDirs): XY[] {
   if (route === 'u-shape') {
-    // Down from the start, across below both ends, and up into the end, so it
-    // passes under whatever sits between them. The dip follows the gap, so it
-    // stays in proportion, with a floor that keeps the arms long enough for
-    // their ends however short the arrow is.
-    const gap = Math.abs(b.x - a.x)
+    // Out from the start (down, unless an end is attached to another side),
+    // across beyond both ends, and back into the end, so it passes under
+    // (or over, or beside) whatever sits between them. The dip follows the
+    // gap, so it stays in proportion, with a floor that keeps the arms long
+    // enough for their ends however short the arrow is.
+    const d = dirs?.start ?? dirs?.end ?? { x: 0, y: 1 }
+    if (d.x === 0) {
+      const gap = Math.abs(b.x - a.x)
+      const dip = Math.min(gap / 2, Math.max(gap * U_DIP, U_MIN_DIP))
+      const y = d.y >= 0 ? Math.max(a.y, b.y) + dip : Math.min(a.y, b.y) - dip
+      return [a, { x: a.x, y }, { x: b.x, y }, b]
+    }
+    const gap = Math.abs(b.y - a.y)
     const dip = Math.min(gap / 2, Math.max(gap * U_DIP, U_MIN_DIP))
-    const y = Math.max(a.y, b.y) + dip
-    return [a, { x: a.x, y }, { x: b.x, y }, b]
+    const x = d.x >= 0 ? Math.max(a.x, b.x) + dip : Math.min(a.x, b.x) - dip
+    return [a, { x, y: a.y }, { x, y: b.y }, b]
   }
   if (route === 'elbow') {
+    // Sideways, up/down, sideways; or up/down, sideways, up/down when the end it leaves from faces up or down.
+    const lead = dirs?.start ?? dirs?.end
+    if (lead && Math.abs(lead.y) > Math.abs(lead.x)) {
+      const midY = (a.y + b.y) / 2
+      return [a, { x: a.x, y: midY }, { x: b.x, y: midY }, b]
+    }
     const midX = (a.x + b.x) / 2
     return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b]
   }
@@ -182,9 +205,9 @@ export type ArrowDrawing = {
 }
 
 /** Everything needed to draw an arrow from `a` to `b` with this look and line width. */
-export function drawArrow(a: XY, b: XY, look: ArrowLook, strokeWidth: number): ArrowDrawing {
+export function drawArrow(a: XY, b: XY, look: ArrowLook, strokeWidth: number, dirs?: EndDirs): ArrowDrawing {
   const s = headSize(strokeWidth)
-  const points = routePoints(a, b, look.route)
+  const points = routePoints(a, b, look.route, dirs)
   const end = endParts(look.end, b, headingAtEnd(points), s)
   const start = endParts(look.start, a, headingAtEnd(points.toReversed()), s)
   const parts = [...start.parts, ...end.parts]
@@ -201,8 +224,8 @@ export function drawArrow(a: XY, b: XY, look: ArrowLook, strokeWidth: number): A
 }
 
 /** The box an arrow takes up, with room for its heads and line width. */
-export function arrowBounds(a: XY, b: XY, look: ArrowLook, strokeWidth: number): { left: number; top: number; width: number; height: number } {
-  const points = routePoints(a, b, look.route)
+export function arrowBounds(a: XY, b: XY, look: ArrowLook, strokeWidth: number, dirs?: EndDirs): { left: number; top: number; width: number; height: number } {
+  const points = routePoints(a, b, look.route, dirs)
   const pad = headSize(strokeWidth) * 0.8 + strokeWidth
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)

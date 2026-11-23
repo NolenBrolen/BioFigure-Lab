@@ -1,6 +1,7 @@
 import { count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
+import { rangeResponse } from "./byte-range";
 import { appMeta } from "./db/schema";
 
 // The API routes live under /api; the app files are served by the assets binding.
@@ -40,6 +41,18 @@ const app = new Hono<{ Bindings: Env }>();
 // A figure link, /app/fig/<id>, opens the editor: the address names the figure and the editor's
 // page is served as it is. (Wrangler runs the Worker first for these addresses.)
 app.get("/app/fig/*", (c) => c.env.ASSETS.fetch(new URL("/app/", c.req.url)));
+
+// Videos (the landing page's tour, /video/*): the assets service always sends the whole file, but
+// Safari plays a video only when it can fetch it in parts (Range requests answered with 206), and
+// seeking needs them too. So the Worker fetches the file and cuts out the part that was asked for.
+app.get("/video/*", async (c) => {
+  const file = await c.env.ASSETS.fetch(new URL(c.req.path, c.req.url));
+  if (!file.ok) return file;
+  return rangeResponse(await file.arrayBuffer(), c.req.header("Range"), {
+    "Content-Type": file.headers.get("Content-Type") ?? "application/octet-stream",
+    "Cache-Control": "public, max-age=86400",
+  });
+});
 
 app.route("/", api);
 app.notFound((c) => c.json({ error: "Not found" }, 404));

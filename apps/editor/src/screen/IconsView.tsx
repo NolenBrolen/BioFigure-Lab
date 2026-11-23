@@ -14,19 +14,25 @@
  *
  * Letters (2026-11-17): chemistry molecules get a first row of two tiles,
  * None and Letters, showing both versions; picking one swaps the icon in place.
+ *
+ * Label text (BIO-56): an icon whose library entry has a text slot (a bottle's
+ * label) gets a "Show text" bar and a text block after the Signs row.
  */
 import { ColourInput } from '@biofigure-lab/ui/components/colour-input/ColourInput'
 import { IconButton } from '@biofigure-lab/ui/components/icon-button/IconButton'
 import { OptionCards } from '@biofigure-lab/ui/components/option-cards/OptionCards'
 import { SegmentedToggle } from '@biofigure-lab/ui/components/segmented-toggle/SegmentedToggle'
 import { Skeleton } from '@biofigure-lab/ui/components/skeleton/Skeleton'
+import { Toggle } from '@biofigure-lab/ui/components/toggle/Toggle'
 import { cn } from '@biofigure-lab/ui/lib/cn'
-import { RotateCcw, Shell } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { RotateCcw, Shell, Type } from 'lucide-react'
+import { useRef, type ReactNode } from 'react'
 
 import { toHex } from '../editor/colour'
+import { MAX_LABEL_LINES, changeLineCount, lineCount, newLineMemory } from '../editor/label-lines'
 import type { FigureCanvas, SelectionInfo } from '../editor/FigureCanvas'
 import { ICON_STYLES, iconById, letterVersions, modeColour, needsLightBacking, signVersions, styleOf, styleVersion, type ColourMode, type IconStyle, type LibraryIcon } from '../editor/icon-library'
+import { LiveTextArea } from './fields'
 import { LibraryPanel } from './LibraryPanel'
 import { useIconSvg } from './useIconSvg'
 import { OpacityRow, PropRow, PropRows, PropertiesHeader, SizeRow } from './properties-pane'
@@ -70,6 +76,7 @@ export function IconsView({ figure, icon, open, onBack, onAdd }: Props) {
             </PropRow>
             <SizeRow width={icon.width} height={icon.height} onResize={(change, keep) => figure?.resize(change, keep)} />
             <OpacityRow opacity={icon.opacity} onChange={(opacity) => figure?.change({ opacity })} />
+            <LabelTextRows figure={figure} icon={icon} />
           </PropRows>
         </aside>
       )}
@@ -196,6 +203,86 @@ function SignsRow({ figure, icon }: { figure: FigureCanvas | null; icon: Selecti
         className="min-w-0 flex-1"
       />
     </PropRow>
+  )
+}
+
+/**
+ * For icons with a text slot: a full-width "Show text" bar that hides the text
+ * without losing it, and a text block (about four lines, longer text scrolls)
+ * for the label's text. The text changes on the icon as you type and becomes
+ * one undo step when you leave the block; Enter starts a new line, Ctrl or
+ * Cmd with Enter leaves it. Other icons have no such rows.
+ */
+function LabelTextRows({ figure, icon }: { figure: FigureCanvas | null; icon: SelectionInfo }) {
+  const memory = useRef(newLineMemory())
+  const slot = icon.slot
+  const text = slot?.text ?? ''
+  if (!slot) return null
+  const lines = lineCount(text)
+  return (
+    <>
+      <PropRow label="Show text">
+        <Toggle
+          variant="bar"
+          label="Show text"
+          hideLabel
+          checked={slot.shown}
+          offIcon={<TypeOff />}
+          onIcon={<Type className="size-4" strokeWidth={2.25} />}
+          onCheckedChange={(shown) => void figure?.setIconText(text, shown)}
+          className="min-w-0 flex-1"
+        />
+      </PropRow>
+      <PropRow label="Lines" top>
+        <OptionCards
+          compact
+          label="Lines"
+          value={String(lines)}
+          onValueChange={(next) => void figure?.setIconText(changeLineCount(text, Number(next), memory.current), slot.shown)}
+          options={Array.from({ length: MAX_LABEL_LINES }, (_, i) => {
+            const n = i + 1
+            return { value: String(n), label: n === 1 ? '1 line' : `${n} lines`, picture: <LinesPicture lines={n} /> }
+          })}
+          className="min-w-0 flex-1"
+        />
+      </PropRow>
+      <PropRow label="Label text" top>
+        <LiveTextArea
+          label="Label text"
+          value={text}
+          placeholder="Type label text"
+          rows={4}
+          enterIsNewLine
+          className="max-h-[6.5rem] min-w-0 flex-1"
+          onType={(next) => void figure?.setIconText(next, slot.shown, false)}
+          onDone={() => figure?.saveIconText()}
+        />
+      </PropRow>
+    </>
+  )
+}
+
+/** A small label with n lines of text, the picture on a Lines tile. */
+function LinesPicture({ lines }: { lines: number }) {
+  return (
+    <svg viewBox="0 0 28 22" aria-hidden="true">
+      <rect x="1" y="1" width="26" height="20" rx="2" fill="#fff" stroke="currentColor" strokeOpacity="0.4" />
+      {Array.from({ length: lines }, (_, i) => {
+        const gap = 14 / Math.max(lines, 2)
+        const y = 11 - ((lines - 1) * gap) / 2 + i * gap
+        return <line key={i} x1={i % 2 ? 8 : 6} x2={i % 2 ? 20 : 22} y1={y} y2={y} stroke="#20242a" strokeWidth="1.6" strokeLinecap="round" />
+      })}
+    </svg>
+  )
+}
+
+/** The "T" of the text icon with a slash through it: no text. */
+function TypeOff() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7V4h16v3M12 4v16M9 20h6" />
+      <path d="M3 21 21 3" />
+    </svg>
   )
 }
 

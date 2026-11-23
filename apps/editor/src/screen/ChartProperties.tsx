@@ -31,13 +31,13 @@ import { ExpandedControls, useExpandedControls } from '@biofigure-lab/ui/lib/exp
 import { useSheetTitleEnd } from '@biofigure-lab/ui/lib/sheet-title'
 import { Activity, Ban, ChartNoAxesCombined, ChartScatter, ChartSpline, Columns2, Crosshair, Flag, ListOrdered, Link2, MoveHorizontal, Repeat, Rows3, Target, TrendingUp, Waves, Waypoints, ArrowDownUp } from 'lucide-react'
 import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowUpToLine, Asterisk, Captions, ChartColumn, ChevronRight, Palette, RotateCcw, Ruler, Search, SlidersHorizontal, Type, X, type LucideIcon } from 'lucide-react'
-import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
+import { useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { COLOUR_BLIND_SAFE, groupColour, parseNumber, yAxis, type ChartData, type TextAlign } from '../editor/chart-model'
 import { CORRECTED_TESTS, CORRECTIONS, STAT_TESTS, VALUE_TESTS, PAIRED_TESTS } from '../editor/chart-stats'
 import { FONTS, fontStack } from '../editor/fonts'
-import { NumberField as SizeField } from './fields'
+import { LiveTextArea, NumberField as SizeField, useTyped, type LiveFieldProps } from './fields'
 import { OpacityRow, PropNote, PropRow, PropRows, PropertiesHeader, SizeRow, type SizeChange } from './properties-pane'
 
 const FONT_OPTIONS: FontOption[] = FONTS.map((font) => ({ name: font.name, category: font.category, family: fontStack(font) }))
@@ -106,25 +106,7 @@ export function Segmented<T extends string>({ label, compact = false, value, opt
   )
 }
 
-type FieldProps = {
-  label: string
-  value: string
-  placeholder?: string
-  /** Every change while typing. */
-  onType: (text: string) => void
-  /** Typing finished: the field was left or Enter pressed. */
-  onDone: () => void
-}
-
-/** Keeps what is being typed while the field has focus; otherwise shows the chart's value. */
-function useTyped(value: string) {
-  const [text, setText] = useState(value)
-  const [focused, setFocused] = useState(false)
-  useEffect(() => {
-    if (!focused) setText(value)
-  }, [value, focused])
-  return { text, setText, focused, setFocused }
-}
+type FieldProps = LiveFieldProps
 
 /** A one-line field that changes the chart as you type; Enter leaves it. */
 function LiveField({ label, value, placeholder, onType, onDone }: FieldProps) {
@@ -147,36 +129,6 @@ function LiveField({ label, value, placeholder, onType, onDone }: FieldProps) {
         setFocused(false)
         onDone()
       }}
-    />
-  )
-}
-
-/** A text box that changes the chart as you type; Enter leaves it, Shift+Enter starts a new line. */
-function LiveTextArea({ label, value, placeholder, onType, onDone }: FieldProps) {
-  const { text, setText, setFocused } = useTyped(value)
-  const expanded = useExpandedControls()
-  return (
-    <textarea
-      aria-label={label}
-      value={text}
-      placeholder={placeholder}
-      rows={2}
-      onFocus={() => setFocused(true)}
-      onChange={(event) => {
-        setText(event.target.value)
-        onType(event.target.value)
-      }}
-      onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-        if (event.key === 'Enter' && !event.shiftKey) {
-          event.preventDefault()
-          event.currentTarget.blur()
-        }
-      }}
-      onBlur={() => {
-        setFocused(false)
-        onDone()
-      }}
-      className={cn('resize-y rounded-md border border-input-border bg-input text-sm outline-none hover:border-input-border-hover focus-visible:ring-2 focus-visible:ring-ring', expanded ? 'w-full px-3 py-2' : 'px-2 py-1')}
     />
   )
 }

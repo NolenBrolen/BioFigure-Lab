@@ -4,7 +4,9 @@
  * them. The row layout of the panels is in properties-pane.tsx.
  */
 import { TextField } from '@biofigure-lab/ui/components/text-field/TextField'
-import type { KeyboardEvent, ReactNode } from 'react'
+import { cn } from '@biofigure-lab/ui/lib/cn'
+import { useExpandedControls } from '@biofigure-lab/ui/lib/expanded-controls'
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 import { formatMm, mmToPx } from '../editor/units'
 
@@ -72,6 +74,62 @@ export function NumberField({ label, showLabel, value, prefix, suffix, min, max,
         if (Number.isFinite(next) && event.target.value !== shown) onCommit(Math.min(max, Math.max(min, next)))
         else event.target.value = shown
       }}
+    />
+  )
+}
+
+export type LiveFieldProps = {
+  label: string
+  value: string
+  placeholder?: string
+  /** Every change while typing. */
+  onType: (text: string) => void
+  /** Typing finished: the field was left or Enter pressed. */
+  onDone: () => void
+}
+
+/** Keeps what is being typed while the field has focus; otherwise shows the value it is given. */
+export function useTyped(value: string) {
+  const [text, setText] = useState(value)
+  const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    if (!focused) setText(value)
+  }, [value, focused])
+  return { text, setText, focused, setFocused }
+}
+
+/**
+ * A text box that changes its object as you type. By default Enter leaves it
+ * and Shift+Enter starts a new line. With `enterIsNewLine`, Enter starts a new
+ * line and Ctrl or Cmd with Enter (or leaving the box) finishes. `rows` is its
+ * height; longer text scrolls inside it.
+ */
+export function LiveTextArea({ label, value, placeholder, onType, onDone, rows = 2, enterIsNewLine = false, className }: LiveFieldProps & { rows?: number; enterIsNewLine?: boolean; className?: string }) {
+  const { text, setText, setFocused } = useTyped(value)
+  const expanded = useExpandedControls()
+  return (
+    <textarea
+      aria-label={label}
+      value={text}
+      placeholder={placeholder}
+      rows={rows}
+      onFocus={() => setFocused(true)}
+      onChange={(event) => {
+        setText(event.target.value)
+        onType(event.target.value)
+      }}
+      onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key !== 'Enter') return
+        if (enterIsNewLine ? event.ctrlKey || event.metaKey : !event.shiftKey) {
+          event.preventDefault()
+          event.currentTarget.blur()
+        }
+      }}
+      onBlur={() => {
+        setFocused(false)
+        onDone()
+      }}
+      className={cn('rounded-md border border-input-border bg-input text-sm outline-none hover:border-input-border-hover focus-visible:ring-2 focus-visible:ring-ring', enterIsNewLine ? 'resize-none overflow-y-auto' : 'resize-y', expanded ? 'w-full px-3 py-2' : 'px-2 py-1', className)}
     />
   )
 }
