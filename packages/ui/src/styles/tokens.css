@@ -1,0 +1,173 @@
+/*
+ * BioFigure Lab design tokens
+ *
+ * A token is a named value (a colour, a size, a timing) that components use
+ * instead of a hard-coded number. Change a token and everything that uses it
+ * follows.
+ *
+ * This file holds:
+ *   1. light and dark mode switching
+ *   2. the scales (fonts, type sizes, spacing, motion, the figure page)
+ *   3. the bridge to Tailwind, so tokens become classes like `bg-panel`
+ *
+ * Colours, corners, shadows and panel sizes live in ./theme.css.
+ */
+
+/* ---------------------------------------------------------------------------
+ * 1. Light and dark mode
+ *
+ * Colours are written as light-dark(<light value>, <dark value>). The browser
+ * picks one based on `color-scheme`. By default that follows the operating
+ * system; data-theme="light" or data-theme="dark" on any element forces it
+ * for that element and everything inside it (see the note in theme.css).
+ * ------------------------------------------------------------------------ */
+:root {
+  color-scheme: light dark;
+}
+[data-theme="light"] {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Scales
+ * ------------------------------------------------------------------------ */
+:root {
+  /* The figure page is white in light and dark mode, so the figure looks the
+     way it will in the journal. */
+  --page: #ffffff;
+  --page-foreground: #111111;
+
+  /* Animation timing. Short on purpose: the interface should feel instant. */
+  --duration-instant: 60ms; /* hover, press */
+  --duration-fast: 120ms; /* tooltips, toggles, small fades */
+  --duration-base: 200ms; /* popovers, panels opening */
+  --duration-slow: 320ms; /* large moves, e.g. a bottom sheet */
+}
+
+/* "Reduce motion" in the operating system turns animation off. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
+
+@theme {
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+
+  /* Type scale. The default size for interface text is 13 px.
+     Each size comes with its line height. */
+  --text-*: initial;
+  --text-2xs: 0.6875rem; /* 11 px: badges, section labels */
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem; /* 12 px: secondary text, field labels */
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem; /* 13 px: default interface text */
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem; /* 14 px: dialogs, longer text */
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem; /* 16 px: dialog titles */
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem; /* 20 px: start screen headings */
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem; /* 24 px: page titles */
+  --text-2xl--line-height: 2rem;
+
+  /* Spacing: one step is 4 px, so p-1 = 4 px, p-2 = 8 px, p-3 = 12 px. */
+  --spacing: 0.25rem;
+
+  /* Easing curves for animations. */
+  --ease-*: initial;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* most movement */
+  --ease-enter: cubic-bezier(0, 0, 0, 1); /* things appearing */
+  --ease-exit: cubic-bezier(0.3, 0, 1, 1); /* things leaving */
+
+  /* Skeleton placeholders: a light band sweeps across them from left to right. */
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  @keyframes shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Bridge to Tailwind
+ *
+ * Each line turns a token into Tailwind classes. For example
+ * `--color-panel: var(--panel)` gives bg-panel, text-panel, border-panel.
+ * The default Tailwind colours are switched off, so only our tokens exist.
+ * ------------------------------------------------------------------------ */
+@theme inline {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  /* Surfaces */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-canvas: var(--canvas);
+  --color-page: var(--page);
+  --color-page-foreground: var(--page-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-tooltip: var(--tooltip);
+  --color-tooltip-foreground: var(--tooltip-foreground);
+
+  /* Quiet fills and secondary text */
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  /* Main action colour */
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-subtle-hover: var(--primary-subtle-hover);
+  --color-primary-subtle-foreground: var(--primary-subtle-foreground);
+
+  /* Lines, fields and focus */
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-input-border: var(--input-border);
+  --color-input-border-hover: var(--input-border-hover);
+  --color-ring: var(--ring);
+  --color-selection: var(--selection);
+
+  /* Status */
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-text: var(--destructive-text);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  /* Loading placeholders */
+  --color-skeleton: var(--skeleton);
+  --color-skeleton-highlight: var(--skeleton-highlight);
+
+  /* Corners, from one base value (--radius in theme.css) */
+  --radius-*: initial;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 8px);
+
+  /* Shadows */
+  --shadow-*: initial;
+  --shadow-sm: var(--elevation-sm);
+  --shadow-md: var(--elevation-md);
+  --shadow-lg: var(--elevation-lg);
+}

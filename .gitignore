@@ -1,0 +1,68 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+storybook-static/
+.astro/
+*.tsbuildinfo
+*.log
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.jks
+credentials*.json
+*-credentials.json
+service-account*.json
+.npmrc
+.netrc
+.aws/
+.ssh/
+
+# Local automation configuration and worktrees
+.claude/
+.codex/
+.agents/
+.mcp.json
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Cloudflare local state and secrets
+.wrangler/
+.dev.vars*
+wrangler.production.jsonc
+
+# The icon library is a separate download: npm run icons
+/icons/
+
+# Private working material
+/brand-drafts/
+/icon-drafts/
+/icon-test/
+
+# Personal notes and planning material
+/notes/
+/private/
+/personal-notes/
+/planning/
+/experiments/
+/drafts/
+/sample-data/
+/PROJECT_NOTES.md
+/CLAUDE.md
+/AGENTS.md
+/skills-lock.json
+*.private.md
+*.personal.md

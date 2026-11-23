@@ -1,0 +1,94 @@
+/*
+ * The one stylesheet to import: Tailwind, our tokens and the theme.
+ * `source("..")` tells Tailwind to look for class names in src/.
+ */
+@import "tailwindcss" source("..");
+@import "./tokens.css";
+@import "./theme.css";
+
+/* `dark:` classes follow data-theme="dark", or the operating system when no
+   theme is set. Prefer tokens (they switch by themselves); use `dark:` only
+   for the rare case a token can't cover. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:not([data-theme="light"], [data-theme="light"] *)) {
+      @slot;
+    }
+  }
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Only body text gets the 13 px default. The page itself keeps the browser's
+     16 px, because every rem size (text and spacing) is measured from it. */
+  body {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+  }
+
+  /* A clear focus outline for keyboard users, never for mouse clicks. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 1px;
+  }
+}
+
+/* Small headings above groups of controls ("Position", "Arrange"). */
+@utility section-label {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+/*
+ * Scrollbars: thin and faint, with no arrows and no track, so they stay out
+ * of the way. Chromium browsers use the ::-webkit-scrollbar rules (they skip
+ * them when the standard properties are set); Firefox uses the standard ones.
+ */
+@layer base {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+    background-color: color-mix(in srgb, var(--color-foreground) 20%, transparent);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--color-foreground) 35%, transparent);
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--color-foreground) 20%, transparent) transparent;
+    }
+  }
+}

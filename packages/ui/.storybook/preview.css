@@ -1,0 +1,13 @@
+/* Tailwind's reset removes list numbers and bullets. Bring them back on
+   Storybook's documentation pages. */
+.sbdocs-content ol {
+  list-style: decimal;
+}
+.sbdocs-content ul {
+  list-style: disc;
+}
+
+/* Base UI: keeps tooltips and other pop-ups above the page content. */
+#storybook-root {
+  isolation: isolate;
+}

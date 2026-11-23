@@ -1,0 +1,27 @@
+{
+  "name": "@biofigure-lab/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The server part of BioFigure Lab: one Cloudflare Worker that serves the app files and /api",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"require('node:fs').mkdirSync('../../dist',{recursive:true})\" && wrangler d1 migrations apply DB --local && wrangler dev --port 8787",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest --run",
+    "db:generate": "drizzle-kit generate",
+    "types": "wrangler types",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.19"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.5",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "~6.0",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.165.0"
+  }
+}

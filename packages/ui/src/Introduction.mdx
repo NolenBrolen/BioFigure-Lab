@@ -1,0 +1,44 @@
+import { Meta } from '@storybook/addon-docs/blocks'
+
+<Meta title="Start here" />
+
+# BioFigure Lab design system
+
+This is the workshop for how the app looks. Nothing here is the real editor yet: the screens are mock-ups.
+
+## What to look at
+
+1. **Components**: the building blocks so far (Button, Icon button, Text field, Search field, Tooltip, Slider, Toggle, Select, Skeleton). Each has:
+   - **Examples**: the component in the places the editor uses it.
+   - **Playground**: one copy you can change in the Controls panel below it.
+2. **Editor sample → Editor**: the editor screen full size, built with the real components where they exist. Hover the buttons, type in the fields.
+3. **Editor sample → Light and dark**: the same screen in both modes, next to each other.
+4. **Tokens → Overview**: the colours, text sizes, spacing, corners, shadows and timings everything is made of.
+
+The paintbrush icon in the toolbar at the top switches between light and dark mode. The figure page stays white in both, so your figure always looks the way it will in the journal.
+
+## The look: Quiet
+
+Picked on 2026-11-04. Neutral grey, docked panels with thin lines between them, a blue main colour, 6 px corners, 13 px text and 28 px controls. It keeps the interface calm so the figure stands out, and leaves the most room for the canvas.
+
+## The components (picked 2026-11-05)
+
+- **Button**: tinted and outlined instead of filled.
+- **Icon button**: always outlined, like keys on a keyboard. When switched on (the active tool) it gets a soft blue tint.
+- **Text field**: always a clearly visible outline.
+- **Search field**: an outlined field like the text field, with the filter button as a separate icon button next to it.
+- **Tooltip**: a small white card with a border and a pointer.
+- **Slider**: a thin track with a round handle and a number field next to it.
+- **Toggle**: a small sliding switch; an Off | On variant where words help.
+- **Select**: an outlined button with the label inside and a small down arrow.
+- **Skeleton**: grey placeholders with a light band sweeping across; still when "reduce motion" is on.
+
+## How the tokens work
+
+A token is a named value, like `--primary` (the main action colour) or `--radius` (how round corners are). Components only use the names, so changing one value restyles everything that uses it. Colours are in `src/styles/theme.css`, the scales (text sizes, spacing, timing) in `src/styles/tokens.css`.
+
+## Next
+
+Menu, Popover, Dialog and Toast, then Tabs, Panel and Toolbar, again with versions to pick from.
+
+The drawing toolbar at the bottom of the canvas is a suggestion; the project notes don't place drawing tools yet.

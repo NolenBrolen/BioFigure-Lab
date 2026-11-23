@@ -1,0 +1,3 @@
+/* The design system's stylesheet, plus this app's own files for Tailwind to scan. */
+@import "@biofigure-lab/ui/styles.css";
+@source ".";
