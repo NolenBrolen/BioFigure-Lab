@@ -1,4 +1,4 @@
-# BioFigure Lab
+<h1><img src=".github/readme/logo.svg" alt="" width="26" height="28"> BioFigure Lab</h1>
 
 **A free, open-source figure editor for the life sciences.**
 
