@@ -93,7 +93,7 @@ You can use and adapt the icons in figures for papers, posters, talks, courses a
 - [x] SVG, PDF and PNG export
 - [x] Colour-blind-safe palettes
 - [x] Mobile UI
-- [ ] Icon text labels
+- [x] Icon text labels
 - [ ] Upload your own images
 - [ ] Figure templates
 - [ ] Example figures
