@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { setup } from '../../test/render'
-import { GraphTypePicker } from './GraphTypePicker'
+import { GRAPH_TYPES, GraphList, GraphTypePicker } from './GraphTypePicker'
 
 describe('GraphTypePicker', () => {
   it('shows the three common graphs and picks one with a click or arrow keys', async () => {
@@ -45,14 +45,24 @@ describe('GraphTypePicker', () => {
     expect(within(popup).getByText('No graph matches that search.')).toBeInTheDocument()
   })
 
-  it('has six graphs in each of the three families', async () => {
+  it('has six graphs in Individual and Box, and seven in Mean with Bar + line last', async () => {
     const { user } = setup(<GraphTypePicker value="bar" onChange={vi.fn()} />)
     await user.click(screen.getByRole('button', { name: 'More graphs' }))
     const popup = await screen.findByRole('dialog')
-    for (const tab of ['Individual', 'Box', 'Mean']) {
+    for (const tab of ['Individual', 'Box']) {
       await user.click(within(popup).getByRole('tab', { name: tab }))
       expect(within(popup).getAllByRole('radio'), tab).toHaveLength(6)
     }
-    expect(within(popup).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Bar', 'Point', 'Line', 'Bar, wide', 'Point, wide', 'Slope'])
+    await user.click(within(popup).getByRole('tab', { name: 'Mean' }))
+    expect(within(popup).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Bar', 'Point', 'Line', 'Bar, wide', 'Point, wide', 'Slope', 'Bar + line'])
+  })
+
+  it('the full list shows every graph under its family name, and a click picks one', async () => {
+    const onPick = vi.fn()
+    const { user } = setup(<GraphList onPick={onPick} />)
+    expect(screen.getAllByRole('radio')).toHaveLength(GRAPH_TYPES.length)
+    expect(screen.getAllByRole('heading').length).toBeGreaterThanOrEqual(3)
+    await user.click(within(screen.getByRole('radiogroup', { name: /Mean/ })).getByRole('radio', { name: /Slope/ }))
+    expect(onPick).toHaveBeenCalledWith('slope')
   })
 })

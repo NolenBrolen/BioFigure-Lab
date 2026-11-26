@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { beeswarm, boxStats, quantile, tint, violinProfile } from './chart-distribution'
 
 describe('chart distribution', () => {
-  it('finds quartiles between neighbouring values', () => {
+  it('finds quartiles between neighbouring values, by rank (n + 1)p', () => {
     expect(quantile([1, 2, 3, 4], 0.5)).toBe(2.5)
-    expect(boxStats([4, 1, 3, 2, 5])).toEqual({ min: 1, q1: 2, median: 3, q3: 4, max: 5 })
+    expect(boxStats([4, 1, 3, 2, 5])).toEqual({ min: 1, q1: 1.5, median: 3, q3: 4.5, max: 5 })
     expect(boxStats([])).toBeUndefined()
   })
 

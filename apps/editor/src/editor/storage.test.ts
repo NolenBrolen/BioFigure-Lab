@@ -101,6 +101,49 @@ describe('figures saved in the browser', () => {
   })
 })
 
+describe('saved data sets (Your data)', () => {
+  const groups = [
+    { name: 'Control', values: [1, 2] },
+    { name: 'Drug', values: [3, null] },
+  ]
+
+  it('keeps a figure saved before data sets existed when the database moves to version 3', async () => {
+    const indexedDB = new IDBFactory()
+    const old = new Dexie('biofigure-lab', { indexedDB, IDBKeyRange })
+    old.version(1).stores({ figures: 'id, updatedAt' })
+    old.version(2).stores({ figures: 'id, updatedAt' })
+    await old.table('figures').add({ id: 'f', name: 'Before', page: { width: 85, height: 60 }, slides: [{ id: 's', canvas: '{"objects":[1]}' }], createdAt: 1, updatedAt: 1 })
+    old.close()
+
+    store = new FigureStore({ indexedDB, IDBKeyRange })
+    expect(await store.get('f')).toMatchObject({ name: 'Before', slides: [{ id: 's', canvas: '{"objects":[1]}' }] })
+    expect(await store.datasets.list()).toEqual([])
+    const set = await store.datasets.add('plate.csv', groups)
+    expect((await store.datasets.list()).map((d) => d.id)).toEqual([set.id])
+  })
+
+  it('lists newest first, renames, duplicates as a separate copy, and deletes with a way back', async () => {
+    const sets = newStore().datasets
+    const first = await sets.add('First', groups)
+    const second = await sets.add('Second', groups)
+    expect((await sets.list()).map((d) => d.name)).toEqual(['Second', 'First'])
+
+    await sets.rename(first.id, '  Renamed ')
+    await sets.rename(second.id, '   ')
+    expect((await sets.list()).map((d) => d.name)).toEqual(['Renamed', 'Second'])
+
+    const copy = await sets.duplicate(first.id)
+    expect(copy).toMatchObject({ name: 'Renamed copy', groups })
+    expect(copy?.id).not.toBe(first.id)
+    expect(await sets.list()).toHaveLength(3)
+
+    const removed = await sets.remove(first.id)
+    expect((await sets.list()).map((d) => d.id)).not.toContain(first.id)
+    await sets.restore(removed!)
+    expect(await sets.get(first.id)).toEqual(removed)
+  })
+})
+
 describe('page sizes', () => {
   it('reads typed millimetres, also with a comma', () => {
     expect(parseMm('85')).toBe(85)

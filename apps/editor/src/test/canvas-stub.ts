@@ -20,3 +20,6 @@ const context = new Proxy<Record<string | symbol, unknown>>({}, {
 })
 
 HTMLCanvasElement.prototype.getContext = (() => context) as unknown as HTMLCanvasElement['getContext']
+
+// Arrows draw their paths with Path2D, which jsdom lacks; drawing is ignored anyway.
+globalThis.Path2D ??= class {} as unknown as typeof Path2D

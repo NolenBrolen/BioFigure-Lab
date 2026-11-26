@@ -64,7 +64,7 @@ export const ERROR_BAR_FAMILIES: ErrorBarFamily[] = [
     bars: [
       { id: 'range', name: 'Range', hint: 'From the smallest to the largest value', up: 1, down: 18, cap: 3 },
       { id: 'iqr', name: 'IQR', hint: 'Interquartile range: the middle half of the values', up: 4, down: 15, cap: 3 },
-      { id: 'mad', name: 'MAD', hint: 'Median absolute deviation: spread that outliers hardly move', up: 5, down: 15, cap: 3 },
+      { id: 'mad', name: 'MAD', hint: 'Raw (unscaled) median absolute deviation: spread that outliers hardly move', up: 5, down: 15, cap: 3 },
     ],
   },
 ]

@@ -31,10 +31,13 @@ describe("licence split", () => {
       "apps/site": "AGPL-3.0-or-later",
       "packages/ui": "AGPL-3.0-or-later",
       "packages/export": "MIT",
+      "packages/sync": "AGPL-3.0-or-later",
     };
-    // The website (apps/site) is not part of the public release, so it is only checked where it exists.
+    // The website (apps/site), the Worker (apps/api) and figure sync (packages/sync) are not part of the public release,
+    // so they are only checked where they exist.
+    const privateParts = ["apps/site", "apps/api", "packages/sync"];
     for (const [dir, licence] of Object.entries(decided)) {
-      if (dir === "apps/site" && !existsSync(join(root, dir))) continue;
+      if (privateParts.includes(dir) && !existsSync(join(root, dir))) continue;
       expect(readJson(`${dir}/package.json`).license, dir).toBe(licence);
     }
   });

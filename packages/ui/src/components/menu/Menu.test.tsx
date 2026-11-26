@@ -51,6 +51,22 @@ describe('ContextMenu', () => {
     expect(onDelete).toHaveBeenCalledOnce()
   })
 
+  it('opens a submenu beside its row from the keyboard and runs its action', async () => {
+    const onFront = vi.fn()
+    const { user } = setup(
+      <ContextMenu sections={[{ label: 'Arrange', actions: [{ label: 'Arrange', submenu: [{ label: 'Bring to front', onClick: onFront }, { label: 'Send to back' }] }] }]}>
+        <div>Canvas object</div>
+      </ContextMenu>,
+    )
+    fireEvent.contextMenu(screen.getByText('Canvas object'))
+    const arrange = await screen.findByRole('menuitem', { name: 'Arrange' })
+    expect(screen.queryByRole('menuitem', { name: 'Bring to front' })).not.toBeInTheDocument()
+    arrange.focus()
+    await user.keyboard('{ArrowRight}')
+    await user.click(await screen.findByRole('menuitem', { name: 'Bring to front' }))
+    expect(onFront).toHaveBeenCalledOnce()
+  })
+
   it('closes with Escape', async () => {
     const { user } = renderMenu()
     await screen.findByRole('menu')

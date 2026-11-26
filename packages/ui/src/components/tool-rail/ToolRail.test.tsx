@@ -37,6 +37,16 @@ describe('ToolRail', () => {
     expect(screen.getByRole('tab', { name: 'Icons' })).toHaveFocus()
   })
 
+  it('keeps a keepMounted panel on the page while another tool is open, so it keeps what was typed in it (BIO-90)', async () => {
+    const kept: Tool[] = [{ ...tools[0]!, panel: <input aria-label="Search icons" />, keepMounted: true }, ...tools.slice(1)]
+    const { user } = setup(<ToolRail tools={kept} />)
+    await user.type(screen.getByRole('textbox', { name: 'Search icons' }), 'mouse')
+    await user.click(screen.getByRole('tab', { name: 'Arrows' }))
+    expect(screen.getByRole('textbox', { name: 'Search icons', hidden: true })).not.toBeVisible()
+    await user.click(screen.getByRole('tab', { name: 'Icons' }))
+    expect(screen.getByRole('textbox', { name: 'Search icons' })).toHaveValue('mouse')
+  })
+
   it('names the rail and its tools for screen readers', () => {
     setup(<ToolRail tools={tools} />)
     const rail = screen.getByRole('tablist', { name: 'Tools' })

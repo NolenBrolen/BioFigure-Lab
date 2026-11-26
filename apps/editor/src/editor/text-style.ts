@@ -16,7 +16,8 @@
  * was picked. Bold text keeps that picked weight as `baseWeight`, next to
  * Fabric's `fontWeight`, which is the weight it is drawn at.
  */
-import { IText, Point, util, type TextStyleDeclaration } from 'fabric'
+import { SCRIPT_SCALE, SCRIPT_SHIFT, type Script } from '@biofigure-lab/ui/lib/script-runs'
+import { IText, type TextStyleDeclaration } from 'fabric'
 
 import { fontByName, fontOf, fontStack, nearestWeight } from './fonts'
 
@@ -32,7 +33,7 @@ IText.prototype._move = function (this: IText, event, prop, direction) {
   return fabricMove.call(this, { altKey: wordKey, metaKey: event.metaKey, keyCode: event.keyCode } as KeyboardEvent, prop, direction)
 }
 
-export type Script = 'none' | 'sub' | 'super'
+export type { Script }
 export type TextAlign = 'left' | 'center' | 'right' | 'justify'
 
 export type TextStyle = {
@@ -75,9 +76,7 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   letterSpacing: 0,
 }
 
-/** How much smaller sub- and superscripts are, and how far they move (as a share of the text size). */
-export const SCRIPT_SCALE = 0.62
-const SCRIPT_SHIFT: Record<Exclude<Script, 'none'>, number> = { sub: 0.22, super: -0.36 }
+export { SCRIPT_SCALE }
 
 type CharStyle = TextStyleDeclaration & { script?: Exclude<Script, 'none'>; baseWeight?: number }
 type WithBase = { baseWeight?: number }
@@ -157,7 +156,7 @@ function fabricValue(key: keyof typeof CHAR_PROPS, value: TextStyle[keyof typeof
 }
 
 /** The size and shift of a character at a size, as plain text or a sub- or superscript. */
-const scriptLook = (script: Script, size: number): CharStyle =>
+export const scriptLook = (script: Script, size: number): CharStyle =>
   script === 'none' ? { fontSize: size, deltaY: 0, script: undefined } : { fontSize: size * SCRIPT_SCALE, deltaY: size * SCRIPT_SHIFT[script], script }
 
 /** Remove the given properties from every character's own look. */
@@ -171,9 +170,12 @@ function clearChars(text: IText, props: readonly string[]): void {
   }
 }
 
-/** Change the look of the text (or its selected characters). */
-export function applyTextStyle(text: IText, change: Partial<TextStyle>): void {
-  const { start, end, whole } = range(text)
+/**
+ * Change the look of the text (or its selected characters). `only` names the
+ * characters to change instead (for text that isn't being typed in).
+ */
+export function applyTextStyle(text: IText, change: Partial<TextStyle>, only?: { start: number; end: number }): void {
+  const { start, end, whole } = only ? { ...only, whole: only.start === 0 && only.end === text.text.length } : range(text)
   for (const key of PARAGRAPH) {
     const value = change[key]
     if (value === undefined) continue
@@ -291,30 +293,6 @@ export function insertSymbol(text: IText, symbol: string): void {
     text.hiddenTextarea.value = text.text
     text._updateTextarea()
   }
-}
-
-/**
- * The box around the selected characters on the page (their first line, when
- * they run over several), for placing the small quick-actions bar right above them.
- */
-export function selectedCharsBox(text: IText): { left: number; top: number; width: number; height: number } | undefined {
-  if (!text.isEditing || text.selectionStart === text.selectionEnd) return undefined
-  const start = text.__getCursorBoundariesOffsets(text.selectionStart)
-  const end = text.__getCursorBoundariesOffsets(text.selectionEnd)
-  const { lineIndex } = text.get2DCursorLocation(text.selectionStart)
-  const sameLine = start.top === end.top
-  const right = sameLine ? end.left : text.width
-  const lineHeight = text.getHeightOfLine(lineIndex) / text.lineHeight
-  const matrix = text.calcTransformMatrix()
-  const corners = [
-    [start.left, start.top],
-    [right, start.top],
-    [start.left, start.top + lineHeight],
-    [right, start.top + lineHeight],
-  ].map(([x = 0, y = 0]) => util.transformPoint(new Point(x - text.width / 2, y - text.height / 2), matrix))
-  const xs = corners.map((p) => p.x)
-  const ys = corners.map((p) => p.y)
-  return { left: Math.min(...xs), top: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) }
 }
 
 /** What a preview can change, kept so it can be put back. */

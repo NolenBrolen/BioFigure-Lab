@@ -167,26 +167,29 @@ function SwatchPanel({ label, value, onChange, noneLabel, used, aside, end, inli
     </div>
   )
   // Opens the system colour picker, for a colour outside the palette.
+  // The system picker's input sits beside the button, not in it (axe: nested-interactive).
   const anyColour = (
-    <Tooltip label="Any colour">
-      <button
-        type="button"
-        aria-label="Any colour"
-        onClick={() => (inline ? setCustom(true) : picker.current?.click())}
-        className="relative grid aspect-square w-full place-items-center rounded-[4px] border border-dashed text-muted-foreground transition-colors duration-(--duration-instant) hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-      >
-        <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
-        <input
-          ref={picker}
-          type="color"
-          tabIndex={-1}
-          aria-hidden="true"
-          className="pointer-events-none absolute bottom-0 left-0 size-0 opacity-0"
-          value={value ?? '#000000'}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </button>
-    </Tooltip>
+    <span className="relative grid">
+      <Tooltip label="Any colour">
+        <button
+          type="button"
+          aria-label="Any colour"
+          onClick={() => (inline ? setCustom(true) : picker.current?.click())}
+          className="grid aspect-square w-full place-items-center rounded-[4px] border border-dashed text-muted-foreground transition-colors duration-(--duration-instant) hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+        >
+          <Plus className="size-4" strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      </Tooltip>
+      <input
+        ref={picker}
+        type="color"
+        tabIndex={-1}
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-0 left-0 size-0 opacity-0"
+        value={value ?? '#000000'}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </span>
   )
   if (inline && custom) {
     return (
@@ -235,6 +238,11 @@ function PanelButton({ label, pressed, onClick, children }: { label: string; pre
       </button>
     </Tooltip>
   )
+}
+
+/** The swatch panel on its own, inside another popup (e.g. a picker with an Icon | Colour switch). */
+export function ColourSwatches(props: SwatchPanelProps) {
+  return <SwatchPanel {...props} />
 }
 
 export type ColourMenuProps = SwatchPanelProps & { trigger: ReactElement; /** Where the popup opens; below the button by default. */ side?: 'bottom' | 'right'; align?: 'start' | 'center'; alignOffset?: PopoverProps['alignOffset'] }

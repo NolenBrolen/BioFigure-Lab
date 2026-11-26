@@ -1,10 +1,11 @@
 import { screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { ExpandedControls } from '../../lib/expanded-controls'
 import { setup } from '../../test/render'
 import { Toggle } from './Toggle'
 
-describe.each(['switch', 'segmented'] as const)('Toggle (%s)', (variant) => {
+describe.each(['bar', 'segmented'] as const)('Toggle (%s)', (variant) => {
   it('is a switch named by its label that says whether it is on', () => {
     setup(<Toggle variant={variant} label="Snap to grid" defaultChecked />)
     expect(screen.getByRole('switch', { name: 'Snap to grid' })).toHaveAttribute('aria-checked', 'true')
@@ -73,15 +74,39 @@ describe('Toggle (bar)', () => {
     expect(onCheckedChange).toHaveBeenLastCalledWith(false)
   })
 
-  it('shows a visible label above the bar, and still names the switch for screen readers', () => {
-    setup(<Toggle variant="bar" label="Show text" />)
+  it('is the default: the fat bar with an X and a tick', () => {
+    setup(<Toggle label="Snap to grid" />)
+    const toggle = screen.getByRole('switch', { name: 'Snap to grid' })
+    expect(toggle.className).toContain('h-11')
+    expect(toggle.querySelector('svg.lucide-x')).not.toBeNull()
+    expect(toggle.querySelector('svg.lucide-check')).not.toBeNull()
+  })
+
+  it('sits at the end of the row at a fixed width next to a visible label, and fills a label-left row', () => {
+    const { unmount } = setup(<Toggle label="Show text" />)
     const label = screen.getByText('Show text')
     const toggle = screen.getByRole('switch', { name: 'Show text' })
     expect(label).toBeVisible()
     const row = toggle.parentElement!
     expect(row).toContainElement(label)
-    expect(row.className).toContain('flex-col')
-    expect(toggle.className).toContain('w-full')
+    expect(row.className).toContain('justify-between')
+    expect(toggle.className).toContain('w-24')
+    unmount()
+
+    setup(<Toggle label="Legend" hideLabel />)
+    expect(screen.getByRole('switch', { name: 'Legend' }).className).toContain('w-full')
+  })
+
+  it("keeps the phone's 96 px fat switch in a phone's sheet, even with a hidden label", () => {
+    setup(
+      <ExpandedControls.Provider value>
+        <Toggle label="Legend" hideLabel />
+      </ExpandedControls.Provider>,
+    )
+    const toggle = screen.getByRole('switch', { name: 'Legend' })
+    expect(toggle.className).toContain('w-24')
+    expect(toggle.className).not.toContain('w-full')
+    expect(toggle.parentElement!.className).not.toContain('w-full')
   })
 
   it('shows its own off and on icons in place of the X and the tick', () => {

@@ -8,15 +8,17 @@
  * itself in a tooltip; `showLabels` puts the names under the icons instead,
  * for when the list grows. Arrow keys move between the buttons.
  *
- * Colour actions show a swatch and open the browser's colour picker.
+ * Colour actions show a swatch and open the browser's colour picker. A
+ * button can open a small widget instead of acting at once (Frame, Style,
+ * Row): a popover on the side away from the object, holding the choices.
  *
  * Built on Base UI's Toolbar and our Tooltip.
  */
 import { Toolbar as ToolbarPrimitive } from '@base-ui/react/toolbar'
-import type { LucideIcon } from 'lucide-react'
-import { useRef, type CSSProperties, type Ref } from 'react'
+import { useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type Ref } from 'react'
 
 import { cn } from '../../lib/cn'
+import { Popover } from '../popover/Popover'
 import { Tooltip } from '../tooltip/Tooltip'
 
 type BaseAction = {
@@ -28,14 +30,27 @@ type BaseAction = {
   disabled?: boolean
 }
 
+/** A Lucide icon, or our own picture taking the same size class (e.g. the Style swatch). */
+export type QuickIcon = ComponentType<{ className?: string; strokeWidth?: number; 'aria-hidden'?: 'true' }>
+
 export type QuickButtonAction = BaseAction & {
-  icon: LucideIcon
+  icon: QuickIcon
   /** Red, for actions that remove things. */
   danger?: boolean
   /** Shown as switched on (e.g. Lock while locked). */
   pressed?: boolean
   /** Gets the button, e.g. to open a menu next to it. */
-  onClick: (button: HTMLElement) => void
+  onClick?: (button: HTMLElement) => void
+  /** Opens a widget from the button instead; `close` shuts it, e.g. after a one-off pick. */
+  widget?: QuickWidget
+}
+
+export type QuickWidget = {
+  /** The widget's title bar, and its name for screen readers. */
+  title: string
+  content: (close: () => void) => ReactNode
+  /** Sizes the widget, e.g. "w-60". */
+  className?: string
 }
 
 export type QuickColourAction = BaseAction & {
@@ -89,14 +104,16 @@ export function QuickActions({ label, groups, showLabels = false, size = 'md', k
 
 function QuickButton({ action, showLabels, small, tooltipSide }: { action: QuickAction; showLabels: boolean; small: boolean; tooltipSide: 'top' | 'bottom' }) {
   const picker = useRef<HTMLInputElement>(null)
+  const [widgetOpen, setWidgetOpen] = useState(false)
   const isColour = 'swatch' in action
   const danger = !isColour && action.danger
+  const widget = isColour ? undefined : action.widget
   const button = (
     <ToolbarPrimitive.Button
       aria-label={showLabels ? undefined : action.label}
       aria-pressed={!isColour && action.pressed !== undefined ? action.pressed : undefined}
       disabled={action.disabled}
-      onClick={(event) => (isColour ? picker.current?.click() : action.onClick(event.currentTarget))}
+      onClick={(event) => (isColour ? picker.current?.click() : action.onClick?.(event.currentTarget))}
       className={cn(
         'flex flex-col items-center justify-center rounded-md select-none',
         'transition-colors duration-(--duration-instant) not-data-disabled:hover:bg-muted',
@@ -104,12 +121,21 @@ function QuickButton({ action, showLabels, small, tooltipSide }: { action: Quick
         showLabels ? 'h-16 min-w-18 gap-1.5 px-2' : small ? 'size-7' : 'size-10',
         danger && 'text-destructive-text',
         !isColour && action.pressed && 'bg-primary-subtle text-primary-subtle-foreground not-data-disabled:hover:bg-primary-subtle-hover',
+        widgetOpen && 'bg-muted',
       )}
     >
       {isColour ? <Swatch action={action} size={showLabels ? 'size-6' : small ? 'size-4' : 'size-5'} /> : <action.icon className={showLabels ? 'size-6' : small ? 'size-4' : 'size-5'} strokeWidth={1.75} aria-hidden="true" />}
       {showLabels && <span className={cn('text-xs whitespace-nowrap', !danger && 'text-muted-foreground')}>{action.label}</span>}
     </ToolbarPrimitive.Button>
   )
+  if (widget) {
+    // The widget opens on the side away from the object, as the tooltips do.
+    return (
+      <Popover title={widget.title} trigger={button} side={tooltipSide} align="center" open={widgetOpen} onOpenChange={setWidgetOpen} className={widget.className}>
+        {widget.content(() => setWidgetOpen(false))}
+      </Popover>
+    )
+  }
   return (
     <>
       {showLabels ? button : <Tooltip label={action.label} shortcut={action.shortcut} side={tooltipSide}>{button}</Tooltip>}

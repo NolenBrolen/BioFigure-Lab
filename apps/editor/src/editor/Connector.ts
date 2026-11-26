@@ -2,21 +2,22 @@
  * An arrow on the canvas: straight, curved, elbow or U-shaped, with any of the
  * arrow ends from the Arrows panel. Its two ends have round handles you can
  * drag; let an end go over an object and it sticks to it (see connectors.ts).
- * Selected, it shows the same box as other objects, with the same rotate
- * areas just outside its corners, but no handles that stretch it. Once let
- * go of, a turned arrow's box squares up again (see squareUp).
+ * Selected, it shows the same box as other objects, with the same corner and
+ * side handles and rotate areas. The handles move its ends (see bakeScale):
+ * the line and heads keep their thickness. Once let go of, a turned arrow's
+ * box squares up again (see squareUp).
  * Elbow and U-shaped arrows leave and enter an end along the side it is attached to.
  * Drawn with the same geometry as the panel tiles, and exported as plain SVG
  * paths, so it stays vector in SVG and PDF.
  */
-import { CORNER_ROUTES, drawArrow, arrowBounds, routePoints, type ArrowLook, type EndDirs, type EndKind, type LineStyle, type MidMark, type Route } from '@biofigure-lab/ui/lib/arrow-geometry'
+import { CORNER_ROUTES, drawArrow, arrowBounds, arrowStrokes, effectiveBend, routePoints, type ArrowLook, type ArrowSize, type EndDirs, type EndKind, type LineStyle, type MidMark, type Route } from '@biofigure-lab/ui/lib/arrow-geometry'
 import { Control, FabricObject, Point, classRegistry, util, type TPointerEvent, type Transform } from 'fabric'
 
 import { arrowSvg, type ConnectorEnd, type Side } from './connectors'
 import type { XY } from './geometry'
 
 /** The connector's own saved properties, besides Fabric's usual ones. */
-const CONNECTOR_PROPERTIES = ['x1', 'y1', 'x2', 'y2', 'route', 'lineStyle', 'startEnd', 'endEnd', 'mid', 'attachStart', 'attachEnd', 'attachStartSide', 'attachEndSide', 'startDir', 'endDir'] as const
+const CONNECTOR_PROPERTIES = ['x1', 'y1', 'x2', 'y2', 'route', 'lineStyle', 'startEnd', 'endEnd', 'mid', 'bend', 'attachStart', 'attachEnd', 'attachStartSide', 'attachEndSide', 'startDir', 'endDir', 'outline', 'outlineWidth'] as const
 
 /** What Fabric reports as the action while an end handle is dragged. */
 export const MOVE_END_ACTION = 'moveArrowEnd'
@@ -41,6 +42,8 @@ export class Connector extends FabricObject {
   declare startEnd: EndKind
   declare endEnd: EndKind
   declare mid: MidMark
+  /** How far a curve bows (share of length); left out: worked out from the angle. */
+  declare bend?: number
   /** Ids of the objects the start and end are stuck to, and which side of each (none for arrows attached before sides existed). */
   declare attachStart?: string
   declare attachEnd?: string
@@ -56,6 +59,10 @@ export class Connector extends FabricObject {
    */
   declare startDir?: Dir
   declare endDir?: Dir
+  /** The colour of the outline round the whole arrow, line and heads; none: no outline. */
+  declare outline?: string
+  /** How wide the outline is, in page pixels, outside the arrow's own edge. */
+  declare outlineWidth?: number
 
   constructor(options: Record<string, unknown> = {}) {
     super(options)
@@ -71,33 +78,44 @@ export class Connector extends FabricObject {
     this.set({
       fill: null,
       objectCaching: false,
-      lockScalingX: true,
-      lockScalingY: true,
       lockSkewingX: true,
       lockSkewingY: true,
     })
-    // Fabric checks controls last-first, so the end handles win over the rotate areas where they overlap.
-    const rotateZones = Object.entries(FabricObject.createControls().controls).filter(([key]) => key.startsWith('rotate-'))
-    this.controls = { ...Object.fromEntries(rotateZones), p1: endControl(0), p2: endControl(1) }
+    // Fabric checks controls last-first, so the end handles win over the box handles, and those over the rotate areas.
+    const made = Object.entries(FabricObject.createControls().controls)
+    const rotateZones = made.filter(([key]) => key.startsWith('rotate-'))
+    const boxHandles = made.filter(([key]) => ['tl', 'tr', 'bl', 'br', 'ml', 'mr', 'mt', 'mb'].includes(key))
+    this.controls = { ...Object.fromEntries(rotateZones), ...Object.fromEntries(boxHandles), p1: endControl(0), p2: endControl(1) }
   }
 
   /** A new arrow from `a` to `b` on the page. */
   static between(a: XY, b: XY, look: ArrowLook, paint: { stroke: string; strokeWidth: number }): Connector {
-    const connector = new Connector({ ...paint, route: look.route, lineStyle: look.line, startEnd: look.start, endEnd: look.end, mid: look.mid })
+    const connector = new Connector({ ...paint, route: look.route, lineStyle: look.line, startEnd: look.start, endEnd: look.end, mid: look.mid, ...(look.bend !== undefined && { bend: look.bend }) })
     connector.setPagePoints(a, b)
     return connector
   }
 
   get look(): ArrowLook {
-    return { route: this.route, line: this.lineStyle, start: this.startEnd, end: this.endEnd, mid: this.mid }
+    return { route: this.route, line: this.lineStyle, start: this.startEnd, end: this.endEnd, mid: this.mid, ...(this.bend !== undefined && { bend: this.bend }) }
+  }
+
+  /** The bow the curve really has, own or automatic. */
+  get effectiveBend(): number {
+    const [a, b] = [{ x: this.x1, y: this.y1 }, { x: this.x2, y: this.y2 }]
+    return effectiveBend(a, b, this.bend)
   }
 
   setLook(look: Partial<ArrowLook>): void {
-    const { route, line, start, end, mid } = { ...this.look, ...look }
+    const { route, line, start, end, mid, bend } = { ...this.look, ...look }
     const [a, b] = this.pagePoints()
     // Another route starts from the plain rules again (attached sides then set their directions afresh).
-    this.set({ route, lineStyle: line, startEnd: start, endEnd: end, mid, ...(route !== this.route && { startDir: undefined, endDir: undefined }) })
+    this.set({ route, lineStyle: line, startEnd: start, endEnd: end, mid, bend, ...(route !== this.route && { startDir: undefined, endDir: undefined }) })
     this.setPagePoints(a, b)
+  }
+
+  /** The outline's width, as the geometry wants it (an outline without a colour doesn't count). */
+  get size(): ArrowSize {
+    return { outline: this.outline ? (this.outlineWidth ?? 0) : 0 }
   }
 
   /** The saved directions as the geometry wants them, or none when no end has one. */
@@ -154,7 +172,7 @@ export class Connector extends FabricObject {
     const turn = util.degreesToRadians(this.angle)
     const back = util.degreesToRadians(360 - this.angle)
     const [ownA, ownB] = [new Point(a).rotate(back), new Point(b).rotate(back)]
-    const box = arrowBounds(ownA, ownB, this.look, this.strokeWidth, this.ownDirs())
+    const box = arrowBounds(ownA, ownB, this.look, this.strokeWidth, this.ownDirs(), this.size)
     const centre = new Point(box.left + box.width / 2, box.top + box.height / 2)
     // Fabric adds the line width to the box itself.
     this.set({
@@ -167,6 +185,11 @@ export class Connector extends FabricObject {
       dirty: true,
     })
     this.setPositionByOrigin(centre.rotate(turn), 'center', 'center')
+    // A level arrow has no top and bottom handles, and an upright one no side ones: they'd sit on the line and do nothing.
+    const path = routePoints(ownA, ownB, this.route, this.ownDirs(), this.bend)
+    const spread = (axis: 'x' | 'y') => Math.max(...path.map((p) => p[axis])) - Math.min(...path.map((p) => p[axis]))
+    const [across, down] = [spread('x') > 1, spread('y') > 1]
+    this.setControlsVisibility({ ml: across, mr: across, mt: down, mb: down })
     this.setCoords()
   }
 
@@ -183,6 +206,53 @@ export class Connector extends FabricObject {
     this.setPagePoints(a, b)
   }
 
+  /**
+   * Turn a stretch by the box handles into moved ends, so the line and heads
+   * keep their thickness while the box is dragged. The ends move within the
+   * room between the box's edges and the drawing (the heads' and line's
+   * share), so the side being held (`originX`, `originY`) stays exactly where
+   * it is and the dragged side follows the pointer. A moved end lets go of
+   * what it was stuck to, as when its own handle is dragged.
+   */
+  bakeScale(originX: string, originY: string): void {
+    const [sx, sy] = [this.scaleX, this.scaleY]
+    if (sx === 1 && sy === 1) return
+    const anchor = this.getPointByOrigin(originX as 'left', originY as 'top')
+    // The full box at scale 1 (Fabric adds the line width round it), and the ends inside it.
+    const [w, h] = [this.width + this.strokeWidth, this.height + this.strokeWidth]
+    const ends = [
+      { x: this.x1, y: this.y1 },
+      { x: this.x2, y: this.y2 },
+    ]
+    const along = (axis: 'x' | 'y', origin: string, size: number, scale: number) => {
+      const values = ends.map((end) => end[axis])
+      const [low, high] = [Math.min(...values), Math.max(...values)]
+      const [padLow, padHigh] = [low + size / 2, size / 2 - high]
+      const inner = high - low
+      // The ends' span grows so the whole box is `scale` times as big; the room round them stays.
+      const k = inner > 0 ? Math.max(0, size * scale - padLow - padHigh) / inner : 1
+      // Each end's place measured from the held side (or the middle), in the new box.
+      return (value: number) => {
+        if (origin === 'left' || origin === 'top') return padLow + (value - low) * k
+        if (origin === 'right' || origin === 'bottom') return -(padHigh + (high - value) * k)
+        return -(size * scale) / 2 + padLow + (value - low) * k
+      }
+    }
+    const fx = along('x', originX, w, sx)
+    const fy = along('y', originY, h, sy)
+    const turn = util.degreesToRadians(this.angle)
+    const toPage = (end: XY): XY => {
+      const [dx, dy] = [fx(end.x), fy(end.y)]
+      return { x: anchor.x + dx * Math.cos(turn) - dy * Math.sin(turn), y: anchor.y + dx * Math.sin(turn) + dy * Math.cos(turn) }
+    }
+    const [before, after] = [this.pagePoints(), ends.map(toPage) as [XY, XY]]
+    const moved = (i: 0 | 1) => Math.hypot(after[i].x - before[i].x, after[i].y - before[i].y) > 0.5
+    if (moved(0)) this.set({ attachStart: undefined, attachStartSide: undefined })
+    if (moved(1)) this.set({ attachEnd: undefined, attachEndSide: undefined })
+    this.set({ scaleX: 1, scaleY: 1 })
+    this.setPagePoints(after[0], after[1])
+  }
+
   /** Which end's handle is within `reach` page pixels of a point, if any. */
   endNear(point: XY, reach: number): 0 | 1 | undefined {
     const index = this.pagePoints().findIndex((end) => Math.hypot(end.x - point.x, end.y - point.y) <= reach)
@@ -191,32 +261,33 @@ export class Connector extends FabricObject {
 
   /** The arrow's points in its own space, for drawing. */
   drawing(): ReturnType<typeof drawArrow> {
-    return drawArrow({ x: this.x1, y: this.y1 }, { x: this.x2, y: this.y2 }, this.look, this.strokeWidth, this.ownDirs())
+    return drawArrow({ x: this.x1, y: this.y1 }, { x: this.x2, y: this.y2 }, this.look, this.strokeWidth, this.ownDirs(), this.size)
   }
 
   _render(ctx: CanvasRenderingContext2D): void {
-    const drawing = this.drawing()
     const colour = typeof this.stroke === 'string' ? this.stroke : '#000000'
+    const { outline = 0 } = this.size
     ctx.save()
-    ctx.strokeStyle = colour
-    ctx.fillStyle = colour
-    ctx.lineWidth = this.strokeWidth
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.setLineDash(drawing.dash ?? [])
-    ctx.stroke(new Path2D(drawing.shaft))
-    ctx.setLineDash([])
-    for (const part of drawing.parts) {
+    ctx.miterLimit = 10
+    for (const part of arrowStrokes(this.drawing(), this.strokeWidth, outline)) {
+      const paint = part.role === 'outline' ? this.outline! : colour
+      ctx.strokeStyle = paint
+      ctx.fillStyle = paint
+      ctx.lineWidth = part.width
+      ctx.lineCap = part.cap
+      ctx.lineJoin = part.join
+      ctx.setLineDash(part.dash ?? [])
       const path = new Path2D(part.d)
       if (part.filled) ctx.fill(path)
-      ctx.stroke(path)
+      if (part.width > 0) ctx.stroke(path)
     }
     ctx.restore()
   }
 
   _toSVG(): string[] {
     const stroke = typeof this.stroke === 'string' ? this.stroke : '#000000'
-    return [`<g opacity="${this.opacity}">\n`, ...arrowSvg(this.drawing(), { stroke, strokeWidth: this.strokeWidth }), '</g>\n']
+    const { outline = 0 } = this.size
+    return [`<g opacity="${this.opacity}">\n`, ...arrowSvg(this.drawing(), { stroke, strokeWidth: this.strokeWidth, ...(outline > 0 && { outline: this.outline, outlineWidth: outline }) }), '</g>\n']
   }
 
   toObject<T extends Omit<Record<string, unknown>, keyof this>, K extends keyof T = never>(propertiesToInclude: K[] = []): Record<string, unknown> {
@@ -240,7 +311,7 @@ const grabOffsets = new WeakMap<Transform, XY>()
 /** One end of the arrow and the direction it points out in, on screen. */
 function screenEnd(object: Connector, index: 0 | 1): { end: Point; out: XY } {
   const matrix = util.multiplyTransformMatrices(object.getViewportTransform(), object.calcTransformMatrix())
-  const path = routePoints({ x: object.x1, y: object.y1 }, { x: object.x2, y: object.y2 }, object.route, object.ownDirs())
+  const path = routePoints({ x: object.x1, y: object.y1 }, { x: object.x2, y: object.y2 }, object.route, object.ownDirs(), object.bend)
   const [end, before] = (index === 0 ? path.slice(0, 2) : path.slice(-2).reverse()).map((p) => util.transformPoint(new Point(p.x, p.y), matrix)) as [Point, Point]
   const length = Math.hypot(end.x - before.x, end.y - before.y)
   return { end, out: length === 0 ? { x: 0, y: 0 } : { x: (end.x - before.x) / length, y: (end.y - before.y) / length } }
@@ -250,7 +321,7 @@ function screenEnd(object: Connector, index: 0 | 1): { end: Point; out: XY } {
  * Set by the editor on its canvas: lines a dragged end up with the page,
  * other objects and the grid, the way moving an object does.
  */
-export type ArrowEndSnapper = (point: XY, arrow: FabricObject, event: TPointerEvent) => XY
+export type ArrowEndSnapper = (point: XY, arrow: FabricObject, event: TPointerEvent, end: 0 | 1) => XY
 
 /**
  * A round handle touching one end of the arrow; dragging it moves that end
@@ -282,7 +353,7 @@ function endControl(index: 0 | 1): Control {
       const offset = grabOffsets.get(transform) ?? { x: 0, y: 0 }
       const free = { x: x - offset.x, y: y - offset.y }
       const snapper = (connector.canvas as { snapArrowEnd?: ArrowEndSnapper } | undefined)?.snapArrowEnd
-      const point = snapper ? snapper(free, connector, event) : free
+      const point = snapper ? snapper(free, connector, event, index) : free
       const [a, b] = connector.pagePoints()
       if (index === 0) connector.set({ attachStart: undefined, attachStartSide: undefined })
       else connector.set({ attachEnd: undefined, attachEndSide: undefined })

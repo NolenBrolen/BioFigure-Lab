@@ -1,0 +1,402 @@
+[
+ {
+  "name": "two-equal-n8",
+  "file": "two-equal-n8.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "2 groups, equal n=8, moderate effect"
+ },
+ {
+  "name": "two-unequal-n",
+  "file": "two-unequal-n.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "2 groups, n=10 vs 6 (blank cells), unequal SD"
+ },
+ {
+  "name": "two-tiny-p",
+  "file": "two-tiny-p.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "very small p (<1e-10)"
+ },
+ {
+  "name": "two-nonsig",
+  "file": "two-nonsig.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "clearly non-significant"
+ },
+ {
+  "name": "three-equal-n6",
+  "file": "three-equal-n6.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "3 groups, n=6"
+ },
+ {
+  "name": "three-unequal-n",
+  "file": "three-unequal-n.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "3 groups n=5,8,6, unequal SD"
+ },
+ {
+  "name": "three-nonsig",
+  "file": "three-nonsig.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "3 groups, nothing significant"
+ },
+ {
+  "name": "four-equal-n5",
+  "file": "four-equal-n5.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "4 groups n=5"
+ },
+ {
+  "name": "six-unequal-n",
+  "file": "six-unequal-n.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "6 groups n=4..7"
+ },
+ {
+  "name": "numeric-names-doses",
+  "file": "numeric-names-doses.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "numeric group names 0..100 (header is numbers only)"
+ },
+ {
+  "name": "numeric-names-comma",
+  "file": "numeric-names-comma.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ";",
+  "value": 0.0,
+  "note": "numeric names with comma decimals, semicolon file"
+ },
+ {
+  "name": "repeated-4-timepoints-missing",
+  "file": "repeated-4-timepoints-missing.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "same 8 samples at 4 times; row 5 missing at 4 h"
+ },
+ {
+  "name": "paired-2-complete",
+  "file": "paired-2-complete.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "paired 2 groups, 9 samples"
+ },
+ {
+  "name": "paired-2-missing",
+  "file": "paired-2-missing.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "paired, one missing cell in After"
+ },
+ {
+  "name": "ties-scores",
+  "file": "ties-scores.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "integer scores with many ties, 3 groups"
+ },
+ {
+  "name": "ties-two-groups",
+  "file": "ties-two-groups.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "2 groups with ties and tied differences (paired rows)"
+ },
+ {
+  "name": "identical-values",
+  "file": "identical-values.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "two groups with all values identical (SD 0)"
+ },
+ {
+  "name": "all-identical",
+  "file": "all-identical.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "every value 7: SD 0 everywhere"
+ },
+ {
+  "name": "outlier",
+  "file": "outlier.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "one clear outlier (61.5) in group 3"
+ },
+ {
+  "name": "tiny-n",
+  "file": "tiny-n.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "groups with n=1, n=2 and n=6"
+ },
+ {
+  "name": "tiny-n-two",
+  "file": "tiny-n-two.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "n=1 vs n=2 only"
+ },
+ {
+  "name": "negative-values",
+  "file": "negative-values.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "negative and positive log2 fold changes"
+ },
+ {
+  "name": "all-negative",
+  "file": "all-negative.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "all values negative"
+ },
+ {
+  "name": "long-names",
+  "file": "long-names.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "very long group names"
+ },
+ {
+  "name": "semicolon-comma-decimals",
+  "file": "semicolon-comma-decimals.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ";",
+  "value": 1.0,
+  "note": "semicolon file with comma decimals, tested against 1"
+ },
+ {
+  "name": "groups-in-rows",
+  "file": "groups-in-rows.csv",
+  "sheet": null,
+  "orientation": "rows",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "groups in rows, names in first column"
+ },
+ {
+  "name": "blank-and-text-cells",
+  "file": "blank-and-text-cells.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "blank cells and text cells (n/a, <LOD) inside number columns"
+ },
+ {
+  "name": "notes-column",
+  "file": "notes-column.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "a text-only column (Comment) that import should leave out"
+ },
+ {
+  "name": "three-groups-xlsx",
+  "file": "three-groups.xlsx",
+  "sheet": "Data",
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "3 groups from an xlsx sheet"
+ },
+ {
+  "name": "multi-sheet [Day 1]",
+  "file": "multi-sheet.xlsx",
+  "sheet": "Day 1",
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "xlsx with 3 sheets"
+ },
+ {
+  "name": "multi-sheet [Day 2]",
+  "file": "multi-sheet.xlsx",
+  "sheet": "Day 2 (blanks and text)",
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "blank and text cells in an xlsx sheet"
+ },
+ {
+  "name": "multi-sheet [Rows layout]",
+  "file": "multi-sheet.xlsx",
+  "sheet": "Rows layout",
+  "orientation": "rows",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "groups in rows in an xlsx sheet, names in first column"
+ },
+ {
+  "name": "numeric-header-xlsx",
+  "file": "numeric-header.xlsx",
+  "sheet": "Doses",
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "xlsx whose header cells are numbers (0, 1, 10, 100)"
+ },
+ {
+  "name": "numeric-no-header-rising",
+  "file": "numeric-no-header-rising.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": false,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "numbers only, first row rises but sits inside each column; header stays off"
+ },
+ {
+  "name": "owner-ELISA-IL6",
+  "file": "ELISA-IL6-pg-per-mL-semicolon.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ";",
+  "value": 0.0,
+  "note": "owner's sample: semicolon, comma decimals, Notes column"
+ },
+ {
+  "name": "owner-cell-viability-MTT",
+  "file": "cell-viability-MTT.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "owner's sample"
+ },
+ {
+  "name": "owner-dose-response-8x200",
+  "file": "dose-response-8-groups-200-rows.csv",
+  "sheet": null,
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 1.0,
+  "note": "owner's sample: 8 groups, 200 rows"
+ },
+ {
+  "name": "owner-qPCR-groups-in-rows",
+  "file": "qPCR-fold-change-groups-in-rows.tsv",
+  "sheet": null,
+  "orientation": "rows",
+  "header": true,
+  "delimiter": "\t",
+  "value": 1.0,
+  "note": "owner's sample: tab-separated, groups in rows"
+ },
+ {
+  "name": "owner-western-blot [Plate 1]",
+  "file": "western-blot-densitometry-3-sheets.xlsx",
+  "sheet": "Plate 1",
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "owner's sample xlsx, sheet 1"
+ },
+ {
+  "name": "owner-western-blot [Plate 2]",
+  "file": "western-blot-densitometry-3-sheets.xlsx",
+  "sheet": "Plate 2",
+  "orientation": "columns",
+  "header": true,
+  "delimiter": ",",
+  "value": 0.0,
+  "note": "owner's sample xlsx, sheet 2"
+ }
+]

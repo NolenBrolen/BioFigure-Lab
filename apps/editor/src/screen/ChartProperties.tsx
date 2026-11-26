@@ -14,30 +14,44 @@
  * makes it one undo step. In the text under the chart, Shift+Enter starts a
  * new line.
  */
+import { Callout } from '@biofigure-lab/ui/components/callout/Callout'
+import { ChartTextField, type ScriptText } from '@biofigure-lab/ui/components/chart-text-field/ChartTextField'
 import { ColourInput, ColourMenu } from '@biofigure-lab/ui/components/colour-input/ColourInput'
 import { IconButton } from '@biofigure-lab/ui/components/icon-button/IconButton'
+import { ReferenceLines } from '@biofigure-lab/ui/components/reference-lines/ReferenceLines'
+import { SegmentedToggle } from '@biofigure-lab/ui/components/segmented-toggle/SegmentedToggle'
+import { useToast } from '@biofigure-lab/ui/components/toast/Toast'
 import { Select } from '@biofigure-lab/ui/components/select/Select'
 import { Slider } from '@biofigure-lab/ui/components/slider/Slider'
 import { FontPicker, type FontOption } from '@biofigure-lab/ui/components/text-controls/FontPicker'
 import { TextField } from '@biofigure-lab/ui/components/text-field/TextField'
 import { Tooltip } from '@biofigure-lab/ui/components/tooltip/Tooltip'
 import { Toggle } from '@biofigure-lab/ui/components/toggle/Toggle'
+import { dataSummary } from '@biofigure-lab/ui/components/graph-panel/ChartDataSection'
 import { ErrorBarPicker, errorBarInfo } from '@biofigure-lab/ui/components/graph-panel/ErrorBarPicker'
 import { GraphTypePicker, graphType, usesErrorBars } from '@biofigure-lab/ui/components/graph-panel/GraphTypePicker'
-import { uprightKind } from '@biofigure-lab/ui/lib/graph-kinds'
+import { isHeatmap, isXy, uprightKind } from '@biofigure-lab/ui/lib/graph-kinds'
 import { Tabs } from '@biofigure-lab/ui/components/tabs/Tabs'
 import { cn } from '@biofigure-lab/ui/lib/cn'
 import { ExpandedControls, useExpandedControls } from '@biofigure-lab/ui/lib/expanded-controls'
 import { useSheetTitleEnd } from '@biofigure-lab/ui/lib/sheet-title'
 import { Activity, Ban, ChartNoAxesCombined, ChartScatter, ChartSpline, Columns2, Crosshair, Flag, ListOrdered, Link2, MoveHorizontal, Repeat, Rows3, Target, TrendingUp, Waves, Waypoints, ArrowDownUp } from 'lucide-react'
-import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowUpToLine, Asterisk, Captions, ChartColumn, ChevronRight, Palette, RotateCcw, Ruler, Search, SlidersHorizontal, Type, X, type LucideIcon } from 'lucide-react'
-import { useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowUpToLine, Asterisk, Captions, ChartColumn, ChevronRight, Palette, RotateCcw, Ruler, Search, SlidersHorizontal, Table2, Type, X, type LucideIcon } from 'lucide-react'
+import { useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-import { COLOUR_BLIND_SAFE, groupColour, parseNumber, yAxis, type ChartData, type TextAlign } from '../editor/chart-model'
-import { CORRECTED_TESTS, CORRECTIONS, STAT_TESTS, VALUE_TESTS, PAIRED_TESTS } from '../editor/chart-stats'
+import { measureText } from '../editor/ChartObject'
+import { framePatch, hiddenOnLog } from '../editor/chart-axis-style'
+import { FrameBoxIcon, FrameNoneIcon, FrameOpenIcon, GridDashedIcon, GridDottedIcon, GridNoneIcon, GridSolidIcon, ScaleLinearIcon, ScaleLogIcon } from './chart-frame-icons'
+import { COLOUR_BLIND_SAFE, drawChart, groupColour, parseNumber, yAxis, type ChartData, type TextAlign } from '../editor/chart-model'
+import type { ChartTextField as ChartTextKey } from '../editor/chart-text'
+import { CORRECTED_TESTS, CORRECTIONS, defaultCorrection, STAT_TESTS, VALUE_TESTS, PAIRED_TESTS } from '../editor/chart-stats'
 import { FONTS, fontStack } from '../editor/fonts'
-import { LiveTextArea, NumberField as SizeField, useTyped, type LiveFieldProps } from './fields'
+import { NumberField as SizeField } from './fields'
+import { comboOf, isCombo, lineChart, type ComboLine } from '../editor/chart-combo'
+import { HeatmapColourRows, HeatmapLabelRows, LiveField, ScaleSummary } from './HeatmapProperties'
+import { hiddenOnXyLog, xyAxes } from '../editor/chart-xy'
+import { DotsSummary, XyColourByRows, XyDotRows, XyPlotRows, XyRangeRows } from './XyProperties'
 import { OpacityRow, PropNote, PropRow, PropRows, PropertiesHeader, SizeRow, type SizeChange } from './properties-pane'
 
 const FONT_OPTIONS: FontOption[] = FONTS.map((font) => ({ name: font.name, category: font.category, family: fontStack(font) }))
@@ -106,33 +120,6 @@ export function Segmented<T extends string>({ label, compact = false, value, opt
   )
 }
 
-type FieldProps = LiveFieldProps
-
-/** A one-line field that changes the chart as you type; Enter leaves it. */
-function LiveField({ label, value, placeholder, onType, onDone }: FieldProps) {
-  const { text, setText, setFocused } = useTyped(value)
-  return (
-    <TextField
-      label={label}
-      hideLabel
-      value={text}
-      placeholder={placeholder}
-      onFocus={() => setFocused(true)}
-      onChange={(event) => {
-        setText(event.target.value)
-        onType(event.target.value)
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur()
-      }}
-      onBlur={() => {
-        setFocused(false)
-        onDone()
-      }}
-    />
-  )
-}
-
 /** A number for the y range, applied when the field is left or Enter is pressed. */
 function NumberField({ label, value, onCommit }: { label: string; value: number; onCommit: (value: number) => void }) {
   const shown = String(Number(value.toPrecision(6)))
@@ -162,6 +149,8 @@ type Props = {
   /** Typing ended: save what was typed as one undo step. */
   onSave: () => void
   onShowData: () => void
+  /** Desktop: the Data section's contents (This chart, Import, Your data). */
+  dataSection?: ReactNode
   /** Phones: the data editor, shown in the Data sheet itself (there is no drawer under the page). */
   data?: ReactNode
   /** The chart's size on the page, in px. */
@@ -182,17 +171,25 @@ const TEST_ICONS: Record<string, LucideIcon> = {
   onesamplewilcoxon: Flag, trend: ChartNoAxesCombined, shapiro: Activity, brownforsythe: MoveHorizontal,
 }
 
-export function ChartProperties({ chart, onChange, onSave, onShowData, data, size, opacity, onResize, onOpacity, usedColours, header }: Props) {
+export function ChartProperties({ chart, onChange, onSave, onShowData, dataSection, data, size, opacity, onResize, onOpacity, usedColours, header }: Props) {
   const [open, setOpen] = useState<ChartSection | null>(null)
-  const [axisTab, setAxisTab] = useState<'y' | 'x'>('y')
+  const [axisTab, setAxisTab] = useState<'y' | 'x' | 'line'>('y')
   const expanded = useExpandedControls()
-  const live = (key: 'title' | 'yTitle' | 'xTitle' | 'caption') => ({ value: chart[key], onType: (text: string) => onChange({ [key]: text }, false), onDone: onSave })
+  // Chart text with its sub- and superscripts (BIO-69): typing changes the chart as you go, leaving the field is one undo step.
+  const rich = (key: ChartTextKey) => ({
+    value: { text: chart[key], runs: chart.textStyles?.[key] },
+    onChange: (next: ScriptText) => onChange({ [key]: next.text, textStyles: { ...chart.textStyles, [key]: next.runs } }, false),
+    onDone: onSave,
+  })
   const listedUnit = chart.yUnit === '' || (Y_UNITS as readonly string[]).includes(chart.yUnit)
   // Custom stays picked while its field is still empty.
   const [customUnit, setCustomUnit] = useState(!listedUnit)
   const unitChoice = customUnit || !listedUnit ? CUSTOM_UNIT : chart.yUnit || NO_UNIT
   const customRange = chart.yMin !== null || chart.yMax !== null
-  const axis = yAxis(chart)
+  // An XY chart's first column is its x values, so its y range comes from the other columns.
+  const xy = isXy(chart.kind)
+  const axis = xy ? xyAxes(chart).y : yAxis(chart)
+  const toasts = useToast()
   const setColour = (i: number, colour: string) => {
     const colours = chart.groups.map((_, j) => groupColour(chart, j))
     colours[i] = colour
@@ -248,11 +245,77 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
       )}
     </>
   )
+  // The plot's frame, grid, tick marks and value scale. The reference lines' list editor is still being designed (BIO-68).
+  const hidden = xy ? hiddenOnXyLog(chart) : hiddenOnLog(chart)
+  const frameRows = (
+    <>
+      {/* Frame, Grid and Scale: a picture over each name, as the shape panel's Long text row (owner's call, BIO-68 round 2). */}
+      <PropRow label="Frame" top>
+        <SegmentedToggle
+          label="Frame round the plot"
+          stacked
+          className="w-full"
+          value={chart.frame}
+          options={[
+            { value: 'open', label: 'Open', icon: FrameOpenIcon },
+            { value: 'box', label: 'Box', icon: FrameBoxIcon },
+            { value: 'none', label: 'None', icon: FrameNoneIcon },
+          ]}
+          onValueChange={(frame) => onChange(framePatch(frame))}
+        />
+      </PropRow>
+      <PropRow label="Grid" top>
+        <SegmentedToggle
+          label="Grid lines"
+          stacked
+          className="w-full"
+          value={chart.grid === 'none' ? 'none' : chart.gridStyle}
+          options={[
+            { value: 'none', label: 'None', icon: GridNoneIcon },
+            { value: 'solid', label: 'Solid', icon: GridSolidIcon },
+            { value: 'dotted', label: 'Dotted', icon: GridDottedIcon },
+            { value: 'dashed', label: 'Dashed', icon: GridDashedIcon },
+          ]}
+          onValueChange={(choice) => onChange(choice === 'none' ? { grid: 'none' } : { grid: 'lines', gridStyle: choice })}
+        />
+      </PropRow>
+      <PropRow label="Ticks">
+        <div className="min-w-0 flex-1">
+          <Segmented
+            label="Tick marks"
+            value={chart.ticks}
+            options={[
+              { id: 'out', name: 'Out', hint: 'Tick marks point out of the plot' },
+              { id: 'in', name: 'In', hint: 'Tick marks point into the plot' },
+            ]}
+            onChange={(ticks) => onChange({ ticks })}
+          />
+        </div>
+      </PropRow>
+      <PropRow label={xy ? 'Y scale' : 'Scale'} top>
+        <SegmentedToggle
+          label={xy ? 'Y axis scale' : 'Value axis scale'}
+          stacked
+          className="w-full"
+          value={chart.yScale}
+          options={[
+            { value: 'linear', label: 'Linear', icon: ScaleLinearIcon },
+            { value: 'log', label: 'Log', icon: ScaleLogIcon },
+          ]}
+          // A typed range at or below 0 can't be used on a log axis, so the range goes back to auto.
+          onValueChange={(yScale) => onChange(yScale === 'log' && ((chart.yMin ?? 1) <= 0 || (chart.yMax ?? 1) <= 0) ? { yScale, yMin: null, yMax: null } : { yScale })}
+        />
+      </PropRow>
+      {/* XY charts: the x axis's scale and the y = x line (BIO-71). */}
+      {xy && <XyPlotRows chart={chart} onChange={onChange} />}
+      {hidden > 0 && <PropNote>{hidden === 1 ? '1 value is' : `${hidden} values are`} 0 or below, so {hidden === 1 ? 'it isn’t' : 'they aren’t'} shown on the log scale.</PropNote>}
+    </>
+  )
   const nameRows = (
     <>
       <PropRow label="Name">
         <div className="min-w-0 flex-1">
-          <LiveField label="Chart name" placeholder="None" {...live('title')} />
+          <ChartTextField label="Chart name" placeholder="None" {...rich('title')} />
         </div>
         {/* Phones: the alignment beside the field, as with the axis titles. */}
         {expanded && chart.title.trim() && <AlignButtons compact what="Align the name" value={chart.titleAlign} onChange={(titleAlign) => onChange({ titleAlign })} />}
@@ -275,8 +338,10 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
         <PropRow label="">
           <IconButton icon={ArrowUpToLine} label="Name above the chart" pressed={chart.titlePosition === 'top'} onClick={() => onChange({ titlePosition: 'top' })} />
           <IconButton icon={ArrowDownToLine} label="Name below the chart" pressed={chart.titlePosition === 'bottom'} onClick={() => onChange({ titlePosition: 'bottom' })} />
-          <span className="w-2" />
-          <AlignButtons what="Align the name" value={chart.titleAlign} onChange={(titleAlign) => onChange({ titleAlign })} />
+          {/* At the row's right end, lined up with the Ω button of the field above (owner's call, 2026-11-24). */}
+          <div className="ml-auto">
+            <AlignButtons what="Align the name" value={chart.titleAlign} onChange={(titleAlign) => onChange({ titleAlign })} />
+          </div>
         </PropRow>
       )}
     </>
@@ -286,7 +351,7 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
       {!expanded && <AxisHeading text="Y axis" />}
       <PropRow label={expanded ? 'Title' : 'Label'}>
         <div className="min-w-0 flex-1">
-          <LiveField label="Y axis title" placeholder="e.g. Concentration" {...live('yTitle')} />
+          <ChartTextField label="Y axis title" placeholder="e.g. Concentration" {...rich('yTitle')} />
         </div>
         {/* Phones: where the title sits along the axis, beside it (owner's call, 2026-11-17). */}
         {expanded && <AlignButtons compact what="Place the y axis title" value={chart.yTitleAlign} onChange={(yTitleAlign) => onChange({ yTitleAlign })} />}
@@ -322,7 +387,7 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
       </PropRow>
       {unitChoice === CUSTOM_UNIT && !expanded && (
         <PropRow label="">
-          <LiveField label="Custom y axis unit" value={chart.yUnit} placeholder="e.g. copies/µL" onType={(yUnit) => onChange({ yUnit }, false)} onDone={onSave} />
+          <ChartTextField label="Custom y axis unit" placeholder="e.g. copies/µL" className="flex-1" {...rich('yUnit')} />
         </PropRow>
       )}
       <PropRow label="Range">
@@ -347,14 +412,87 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
           </div>
         </PropRow>
       )}
+      {/* Lines across the plot at a value (design A of three drafts, picked for BIO-68). Removing one offers Undo in a toast. */}
+      <PropRow label="Reference lines" top wide>
+        <ReferenceLines
+          lines={chart.referenceLines}
+          // A new line starts at a number in the middle of the axis, so it shows straight away.
+          newValue={axis.ticks[Math.floor(axis.ticks.length / 2)] ?? axis.min}
+          parseValue={parseNumber}
+          onChange={(referenceLines, typing) => onChange({ referenceLines }, typing ? false : undefined)}
+          onTypingDone={onSave}
+          onRemove={(_index, line) => {
+            const before = chart.referenceLines
+            const id = toasts.add({
+              title: line.label.trim() ? `Removed the line “${line.label.trim()}”` : `Removed the line at ${Number(line.value.toPrecision(6))}`,
+              actionProps: {
+                children: 'Undo',
+                onClick: () => {
+                  toasts.close(id)
+                  onChange({ referenceLines: before })
+                },
+              },
+            })
+          }}
+        />
+      </PropRow>
+    </>
+  )
+  // Bar + line charts: the line's measure, its colour and whether it has its own axis on the right (BIO-72).
+  const combo = isCombo(chart.kind) ? comboOf(chart) : undefined
+  const setCombo = (patch: Partial<ComboLine>, save?: boolean) => combo && onChange({ combo: { ...combo, ...patch } }, save)
+  const lineAxis = combo && yAxis(lineChart(chart))
+  const lineAxisRows = combo && lineAxis && (
+    <>
+      {!expanded && <AxisHeading text="Line" second />}
+      <PropRow label="Title">
+        <div className="min-w-0 flex-1">
+          <LiveField label="Line title" placeholder="e.g. Viability" value={combo.title} onType={(title) => setCombo({ title }, false)} onDone={onSave} />
+        </div>
+      </PropRow>
+      <PropRow label="Unit">
+        <div className="min-w-0 flex-1">
+          <LiveField label="Line unit" placeholder="None" value={combo.unit} onType={(unit) => setCombo({ unit }, false)} onDone={onSave} />
+        </div>
+      </PropRow>
+      <PropRow label="Colour">
+        <ColourInput label="Line colour" value={combo.colour.toLowerCase()} onChange={(colour) => colour && setCombo({ colour })} used={usedColours} className="min-w-0 flex-1" />
+      </PropRow>
+      <PropRow label="Right axis">
+        <Toggle label="Line on its own axis on the right" hideLabel checked={combo.rightAxis} onCheckedChange={(rightAxis) => setCombo({ rightAxis })} />
+      </PropRow>
+      {combo.rightAxis && (
+        <PropRow label="Range">
+          <div className="min-w-0 flex-1">
+            <Segmented
+              label="Right axis range"
+              value={combo.min !== null || combo.max !== null ? 'custom' : 'auto'}
+              options={[
+                { id: 'auto', name: 'Auto', hint: 'Worked out from the line’s values' },
+                { id: 'custom', name: 'Custom', hint: 'Type where the right axis starts and ends' },
+              ]}
+              onChange={(choice) => setCombo(choice === 'auto' ? { min: null, max: null } : { min: lineAxis.min, max: lineAxis.max })}
+            />
+          </div>
+        </PropRow>
+      )}
+      {combo.rightAxis && (combo.min !== null || combo.max !== null) && (
+        <PropRow label="">
+          <div className={cn('grid min-w-0 flex-1 grid-cols-2', expanded ? 'gap-2' : 'gap-1')}>
+            <NumberField label="Right axis from" value={lineAxis.min} onCommit={(min) => setCombo({ min })} />
+            <NumberField label="Right axis to" value={lineAxis.max} onCommit={(max) => setCombo({ max })} />
+          </div>
+        </PropRow>
+      )}
     </>
   )
   const xAxisRows = (
     <>
       {!expanded && <AxisHeading text="X axis" second />}
       <PropRow label={expanded ? 'Title' : 'Label'}>
-        <LiveField label="X axis title" placeholder="None" {...live('xTitle')} />
+        <ChartTextField label="X axis title" placeholder="None" className="flex-1" {...rich('xTitle')} />
       </PropRow>
+      {xy && <XyRangeRows chart={chart} onChange={onChange} />}
       <PropRow label="Tick labels">
         <Toggle label="Tick labels" hideLabel checked={chart.tickLabels} onCheckedChange={(tickLabels) => onChange({ tickLabels })} />
       </PropRow>
@@ -368,9 +506,10 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
         <Tabs
           label="Axis"
           value={axisTab}
-          onValueChange={(next) => setAxisTab(next === 'x' ? 'x' : 'y')}
+          onValueChange={(next) => setAxisTab(next === 'x' || next === 'line' ? next : 'y')}
           tabs={[
             { value: 'y', label: 'Y axis' },
+            ...(lineAxisRows ? [{ value: 'line', label: 'Line' }] : []),
             { value: 'x', label: 'X axis' },
           ]}
           className="w-full [&_[role=tablist]]:h-11 [&_[role=tablist]]:px-0"
@@ -386,11 +525,12 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
           }}
         />
       </PropRow>
-      {axisTab === 'y' ? yAxisRows : xAxisRows}
+      {axisTab === 'x' ? xAxisRows : axisTab === 'line' && lineAxisRows ? lineAxisRows : yAxisRows}
     </>
   ) : (
     <>
       {yAxisRows}
+      {lineAxisRows}
       {xAxisRows}
     </>
   )
@@ -399,7 +539,10 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
       <Toggle label="Legend" hideLabel checked={chart.legend} onCheckedChange={(legend) => onChange({ legend })} />
     </PropRow>
   )
-  const coloursRow = (
+  // XY charts: each series' colour and dot (draft A, BIO-71) in place of the groups' colours.
+  const coloursRow = xy ? (
+    <XyDotRows chart={chart} onChange={onChange} usedColours={usedColours} />
+  ) : (
     <PropRow label="Colours" wide={!expanded} hideLabel={!expanded}>
       {expanded ? (
         <GroupColours chart={chart} onColour={setColour} onReset={() => onChange({ colours: [...COLOUR_BLIND_SAFE] })} />
@@ -434,8 +577,9 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
       )}
     </PropRow>
   )
+  // XY charts: the palettes get a title and a line above them, so they don't read as more Colour by choices (owner's call, 2026-11-25).
   const templatesRow = (
-    <PropRow label="Templates" wide hideLabel={!expanded}>
+    <PropRow label={xy ? 'Palettes' : 'Templates'} rowId="Templates" wide hideLabel={!expanded && !xy}>
       <ColourTemplates chart={chart} onPick={(colours) => onChange({ colours })} />
     </PropRow>
   )
@@ -483,13 +627,23 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
   const captionRow = (
     <PropRow label="Under chart" top>
       <div className={cn('flex min-w-0 flex-1 gap-1', expanded ? 'items-start gap-2' : 'flex-col')}>
-        <LiveTextArea label="Text under the chart" placeholder="e.g. Primers: GAPDH fw/rv" {...live('caption')} />
-        <AlignButtons compact={expanded} what="Align the text under the chart" value={chart.captionAlign} onChange={(captionAlign) => onChange({ captionAlign })} />
+        <ChartTextField label="Text under the chart" placeholder="e.g. Primers: GAPDH fw/rv" multiline rows={2} className="w-full" {...rich('caption')} />
+        {/* Desktop: at the right end, lined up with the Ω button above. */}
+        <div className={cn(!expanded && 'self-end')}>
+          <AlignButtons compact={expanded} what="Align the text under the chart" value={chart.captionAlign} onChange={(captionAlign) => onChange({ captionAlign })} />
+        </div>
       </div>
     </PropRow>
   )
+  // Too many brackets squash the plot: say what makes room, rather than changing the chart behind the user's back.
+  const crowded = useMemo(() => chart.test !== 'none' && drawChart(chart, measureText).crowded, [chart])
   const statsRows = (
     <>
+      {crowded && (
+        <Callout className="col-span-2">
+          The brackets don’t fit, so the chart is squashed. To make room, try {[chart.test !== 'control' && !VALUE_TESTS.has(chart.test) && 'ANOVA + Dunnett (each group against the first)', chart.showNs && 'turning off Show ns', 'making the chart taller'].filter(Boolean).join(', or ')}.
+        </Callout>
+      )}
       <PropRow label="Test" wide={!expanded} hideLabel={!expanded}>
         {/* Desktop: every test listed at once, not behind a dropdown. */}
         <ExpandedControls.Provider value>
@@ -512,7 +666,7 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
           {CORRECTED_TESTS.has(chart.test) && (
             <PropRow label="Correction">
               <ExpandedControls.Provider value>
-                <Select label="Correction for several comparisons" hideLabel className="min-w-0 flex-1" options={CORRECTIONS.map((c) => ({ value: c.id, label: c.name }))} value={chart.correction} onValueChange={(correction) => onChange({ correction })} />
+                <Select label="Correction for several comparisons" hideLabel className="min-w-0 flex-1" options={CORRECTIONS.map((c) => ({ value: c.id, label: c.name }))} value={chart.correction ?? defaultCorrection(chart.test)} onValueChange={(correction) => onChange({ correction })} />
               </ExpandedControls.Provider>
             </PropRow>
           )}
@@ -539,21 +693,49 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
     </>
   )
 
+  // A heatmap has no legend, tests or value axis: its own colour and label settings take their place.
+  const heatmap = isHeatmap(chart.kind) ? { colours: <HeatmapColourRows chart={chart} onChange={onChange} onSave={onSave} />, labels: <HeatmapLabelRows chart={chart} onChange={onChange} onSave={onSave} /> } : undefined
+
   // Phones: no tabs. Every setting is listed once, in the order of the property bar's items (Kind, Data, Colours, Axes,
   // Labels, Font, Statistics, then size and opacity under Properties); see mobile-props.
-  if (expanded) {
+  if (expanded && heatmap) {
     return (
       <PropRows>
         {kindRows}
         {dataRow}
+        {heatmap.colours}
+        {heatmap.labels}
+        {nameRows}
+        {captionRow}
+        {fontRows}
+        {sizeRows}
+      </PropRows>
+    )
+  }
+  // XY charts: dots coloured by a column after the colours; no significance tests (their tests compare groups).
+  const divider = <div aria-hidden="true" className="col-span-2 border-t" />
+  const colourByRows = xy ? (
+    <>
+      {divider}
+      <XyColourByRows chart={chart} onChange={onChange} />
+      {divider}
+    </>
+  ) : null
+  if (expanded) {
+    return (
+      <PropRows>
+        {kindRows}
+        {frameRows}
+        {dataRow}
         {coloursRow}
+        {colourByRows}
         {templatesRow}
         {axisRows}
         {nameRows}
         {captionRow}
         {legendRow}
         {fontRows}
-        {statsRows}
+        {!xy && statsRows}
         {sizeRows}
       </PropRows>
     )
@@ -562,7 +744,8 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
   // Desktop (drill-in list, design A of five drafts, picked 2026-11-19): a list of the same sections as the phone's
   // property bar, each with what it is set to now; a click opens just that section's rows, Back returns to the list.
   const sections: { id: ChartSection; icon: LucideIcon; summary: ReactNode; rows: ReactNode }[] = [
-    { id: 'Graph', icon: ChartColumn, summary: usesErrorBars(chart.kind) ? `${graphType(chart.kind)?.name ?? ''}, ${chart.errorBars === 'none' ? 'no error bars' : (errorBarInfo(chart.errorBars)?.name ?? chart.errorBars)}` : (graphType(chart.kind)?.name ?? ''), rows: kindRows },
+    { id: 'Graph', icon: ChartColumn, summary: usesErrorBars(chart.kind) ? `${graphType(chart.kind)?.name ?? ''}, ${chart.errorBars === 'none' ? 'no error bars' : (errorBarInfo(chart.errorBars)?.name ?? chart.errorBars)}` : (graphType(chart.kind)?.name ?? ''), rows: <>{kindRows}{frameRows}</> },
+    { id: 'Data', icon: Table2, summary: chart.source?.name ?? dataSummary(chart.groups), rows: dataSection },
     { id: 'Title & caption', icon: Captions, summary: [chart.title.trim() || 'No title', chart.legend ? 'legend' : ''].filter(Boolean).join(' · '), rows: <>{nameRows}{captionRow}{legendRow}</> },
     {
       id: 'Colours',
@@ -574,14 +757,26 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
           ))}
         </span>
       ),
-      rows: <>{coloursRow}{templatesRow}</>,
+      rows: <>{coloursRow}{colourByRows}{templatesRow}</>,
     },
     { id: 'Y/X-Axis', icon: Ruler, summary: [chart.yTitle || 'No y title', chart.yUnit].filter(Boolean).join(' · '), rows: axisRows },
     { id: 'Font', icon: Type, summary: `${FONTS.find((f) => fontStack(f) === chart.fontFamily)?.name ?? chart.fontFamily}, ${chart.fontSize} pt`, rows: fontRows },
     { id: 'Statistics', icon: Asterisk, summary: STAT_TESTS.find((t) => t.id === chart.test)?.name ?? '', rows: statsRows },
     { id: 'Properties', icon: SlidersHorizontal, summary: `${Math.round(opacity * 100)}% opacity`, rows: sizeRows },
   ]
-  const current = sections.find((s) => s.id === open)
+  const listed = xy
+    ? sections.filter((s) => s.id !== 'Statistics').map((s) => (s.id === 'Colours' ? { ...s, summary: <DotsSummary chart={chart} /> } : s))
+    : heatmap
+    ? sections
+        .filter((s) => s.id !== 'Statistics')
+        .map((s) =>
+          s.id === 'Colours' ? { ...s, summary: <ScaleSummary chart={chart} />, rows: heatmap.colours }
+          : s.id === 'Y/X-Axis' ? { ...s, id: 'Rows and columns' as const, summary: [chart.yTitle, chart.xTitle].filter(Boolean).join(' · ') || (chart.tickLabels ? 'Names shown' : 'No names'), rows: heatmap.labels }
+          : s.id === 'Title & caption' ? { ...s, summary: chart.title.trim() || 'No title', rows: <>{nameRows}{captionRow}</> }
+          : s,
+        )
+    : sections
+  const current = listed.find((s) => s.id === open)
   // One back arrow: the list's header leaves the chart's settings for the graph tiles; an open section's returns to the list.
   const head = current ? (
     <PropertiesHeader backLabel="Back to all chart settings" picture={<current.icon className="size-5" />} name={current.id} onBack={() => setOpen(null)} />
@@ -592,7 +787,8 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
     return (
       <div>
         {head}
-        <PropRows>{current.rows}</PropRows>
+        {/* Data has its own tabs and padding. */}
+        {current.id === 'Data' ? current.rows : <PropRows>{current.rows}</PropRows>}
       </div>
     )
   }
@@ -600,7 +796,7 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
     <>
       {head}
     <ul aria-label="Chart settings" className="divide-y">
-      {sections.map(({ id, icon: Icon, summary }) => (
+      {listed.map(({ id, icon: Icon, summary }) => (
         <li key={id}>
           <button type="button" onClick={() => setOpen(id)} className="flex h-14 w-full items-center gap-3 px-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
             <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -615,7 +811,7 @@ export function ChartProperties({ chart, onChange, onSave, onShowData, data, siz
   )
 }
 
-type ChartSection = 'Graph' | 'Colours' | 'Y/X-Axis' | 'Title & caption' | 'Font' | 'Statistics' | 'Properties'
+type ChartSection = 'Graph' | 'Data' | 'Colours' | 'Y/X-Axis' | 'Rows and columns' | 'Title & caption' | 'Font' | 'Statistics' | 'Properties'
 
 /**
  * Phones: the groups' colours as a row of chips (colour and name); the picked

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { renameChartText } from './chart-label-editor'
-import { chartSizeForPage, chartSvg, createChart, drawChart, roughMeasure, moveGroup, parseNumber, parsePasted, pasteInto, removeRow, setValue, errorBounds, stats, withDefaults, yAxis, yLabel, type ChartData } from './chart-model'
+import { chartSizeForPage, chartSvg, createChart, drawChart, fitGroupLabels, heightToFit, roughMeasure, textBox, moveGroup, parseNumber, parsePasted, pasteInto, removeRow, setValue, errorBounds, stats, withDefaults, yAxis, yLabel, type ChartData } from './chart-model'
 
 describe('pasting chart data', () => {
   it('reads a block from Excel or Google Sheets, with group names from the first row', () => {
@@ -15,6 +15,14 @@ describe('pasting chart data', () => {
     expect(parseNumber('1,25')).toBe(1.25)
     expect(parseNumber('1,250.5')).toBe(1250.5)
     expect(parseNumber('n/a')).toBeNull()
+  })
+
+  it('reads the real minus sign, and takes the last of a point and a comma as the decimal mark', () => {
+    expect(parseNumber('−2.5')).toBe(-2.5)
+    expect(parseNumber('–2,5')).toBe(-2.5)
+    expect(parseNumber('1.234,5')).toBe(1234.5)
+    expect(parseNumber('1,234.5')).toBe(1234.5)
+    expect(parseNumber('1,234')).toBe(1.234)
   })
 
   it('pastes numbers into the cell they land on, growing the table', () => {
@@ -110,6 +118,14 @@ describe('arranging a chart', () => {
     delete old.barWidth
     expect(withDefaults(old as ChartData)).toMatchObject({ title: '', test: 'none', barWidth: 0.6 })
   })
+
+  it('draws a chart that has no data source, as charts made before Your data do', () => {
+    const chart = createChart('bar', 'sd')
+    expect(chart.source).toBeUndefined()
+    expect(drawChart(withDefaults(chart)).rects.length).toBe(chart.groups.length)
+    const withSource = { ...chart, source: { id: 'd1', name: 'plate.csv', importedAt: 1 } }
+    expect(drawChart(withSource).rects.length).toBe(chart.groups.length)
+  })
 })
 
 describe('chart text and error bars', () => {
@@ -130,6 +146,28 @@ describe('chart text and error bars', () => {
     }
     const chart = createChart('bar', 'sd')
     expect(lowest({ ...chart, errorInside: true })).toBeGreaterThan(lowest(chart))
+  })
+
+  it('draws the error bar of a bar below zero downward, away from zero, with the cap at its outer end', () => {
+    const chart: ChartData = { ...createChart('bar', 'sd'), groups: [{ name: 'A', values: [-4, -5, -6] }] }
+    const d = drawChart(chart)
+    const bar = d.rects[0]!
+    const stem = d.lines.find((l) => l.x1 === l.x2 && l.x1 > d.plot.left + 1 && l.y1 !== l.y2)!
+    const below = Math.max(stem.y1, stem.y2)
+    expect(below).toBeGreaterThan(bar.y + bar.height + 1) // runs past the bar's far end, not back toward zero
+    expect(Math.min(stem.y1, stem.y2)).toBeCloseTo(bar.y + bar.height, 5) // starts at the bar's end
+    expect(d.lines.some((l) => l.y1 === l.y2 && l.y1 === below && l.x1 < stem.x1 && l.x2 > stem.x1)).toBe(true)
+    expect(yAxis(chart).min).toBeLessThanOrEqual(-6) // the axis reaches the outer end
+    const above = drawChart({ ...chart, groups: [{ name: 'A', values: [4, 5, 6] }] })
+    const up = above.lines.find((l) => l.x1 === l.x2 && l.x1 > above.plot.left + 1 && l.y1 !== l.y2)!
+    expect(Math.min(up.y1, up.y2)).toBeLessThan(above.rects[0]!.y)
+  })
+
+  it('counts the whisker in the column the width handles use', () => {
+    const chart: ChartData = { ...createChart('bar', 'sd'), groups: [{ name: 'A', values: [-4, -5, -6] }], yMin: -8, yMax: 0 }
+    const d = drawChart(chart)
+    const bar = d.rects[0]!
+    expect(d.columns[0]!.y + d.columns[0]!.height).toBeGreaterThan(bar.y + bar.height + 1)
   })
 })
 
@@ -187,16 +225,20 @@ describe('significance brackets', () => {
 describe('chart size for the page', () => {
   const mm = (value: number) => (value * 96) / 25.4
 
-  it('keeps the 85 mm default on a double-column page', () => {
-    expect(chartSizeForPage({ width: mm(174), height: mm(120) })).toEqual({ width: 320, height: 240 })
+  it('fills the area inside the 4 mm page margins on a single-, 1.5- or double-column page', () => {
+    for (const [width, height] of [[85, 60], [114, 80], [174, 120], [85, 120]] as const) {
+      const size = chartSizeForPage({ width: mm(width), height: mm(height) })
+      expect(size.width).toBeCloseTo(mm(width - 8))
+      expect(size.height).toBeCloseTo(mm(height - 8))
+    }
   })
 
-  it('starts at half the page width on a single-column page, so it fits on the page', () => {
-    const page = { width: mm(85), height: mm(60) }
-    const size = chartSizeForPage(page)
-    expect(size.width).toBeCloseTo(page.width / 2)
-    expect(size.height).toBeCloseTo((size.width * 3) / 4)
-    expect(size.height).toBeLessThan(page.height)
+  it('starts at half the page width (at most 85 mm), in the shape of the margin area, when the page already has something', () => {
+    for (const [width, height] of [[85, 60], [174, 120]] as const) {
+      const size = chartSizeForPage({ width: mm(width), height: mm(height) }, false)
+      expect(size.width).toBeCloseTo(Math.min(320, mm(width) / 2))
+      expect(size.width / size.height).toBeCloseTo((width - 8) / (height - 8))
+    }
   })
 
   it('stays inside a short, wide page', () => {
@@ -224,7 +266,7 @@ describe('graph types', () => {
     const box = drawChart(chart).rects[0]!
     const axis = drawChart({ ...chart, yMin: 0, yMax: 6 })
     const unit = axis.plot.height / 6
-    expect(drawChart({ ...chart, yMin: 0, yMax: 6 }).rects[0]!.height).toBeCloseTo(2 * unit, 5) // quartiles 2 and 4
+    expect(drawChart({ ...chart, yMin: 0, yMax: 6 }).rects[0]!.height).toBeCloseTo(3 * unit, 5) // quartiles 1.5 and 4.5 (rank (n + 1)p)
     expect(drawChart({ ...chart, errorBars: 'none' }).lines).toEqual(drawChart(chart).lines)
     expect(box.height).toBeGreaterThan(0)
   })
@@ -241,6 +283,13 @@ describe('graph types', () => {
     expect(chartSvg(createChart('violin', 'none')).join('')).toContain('<polygon ')
     expect(yAxis(createChart('dots-bars', 'sd')).min).toBe(0)
     expect(yAxis(createChart('box', 'sd')).min).toBeGreaterThanOrEqual(0)
+  })
+
+  it('lets the widest real violin fill its column even when another group has one value or identical values', () => {
+    const groups = [{ name: 'A', values: [1, 2, 2.5, 3, 7, 8, 8.5] }, { name: 'B', values: [4] }, { name: 'C', values: [5, 5, 5] }]
+    const d = drawChart({ ...createChart('violin', 'none'), groups, yMin: 0, yMax: 10 })
+    const xs = d.polygons[0]!.points.map((pt) => pt.x)
+    expect((Math.max(...xs) - Math.min(...xs)) / 2).toBeCloseTo(d.columns[0]!.width / 2, 3)
   })
 
   it('keeps the dots of a spread plot apart', () => {
@@ -308,7 +357,7 @@ describe('error bar whiskers', () => {
 
   it('runs range and IQR from real values, uneven around the mean', () => {
     expect(bounds('range')).toEqual({ low: 2, high: 9 })
-    expect(bounds('iqr')).toEqual({ low: 4, high: 5.5 })
+    expect(bounds('iqr')).toEqual({ low: 4, high: 6.5 }) // quartiles at ranks 2.25 and 6.75, the (n + 1)p rule
   })
 
   it('centres MAD on the median and draws nothing for None', () => {
@@ -321,5 +370,75 @@ describe('error bar whiskers', () => {
     expect(drawChart(one).lines.length).toBe(drawChart({ ...one, errorBars: 'none' }).lines.length)
     const old = { ...createChart('point', 'sem'), groups: [{ name: 'A', values }] }
     expect(drawChart(old).lines.length).toBeGreaterThan(drawChart({ ...old, errorBars: 'none' }).lines.length)
+  })
+})
+
+describe('labels that fit the chart (BIO-62)', () => {
+  const width = (line: string, s: number) => roughMeasure(line, s, 'Inter')
+  type Box = { x: number; y: number; width: number; height: number }
+  const meets = (p: Box, q: Box) => p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height
+  const groupBoxes = (chart: ChartData) => {
+    const d = drawChart(chart)
+    return d.texts.filter((t) => t.role.kind === 'group').map((t) => ({ t, box: textBox(t, roughMeasure) }))
+  }
+
+  it('shrinks group names first, then wraps them, then tilts them, then stands them up', () => {
+    expect(fitGroupLabels(['Control', 'Drug A'], 200, 10, width)).toMatchObject({ size: 10, angle: 0 })
+    const smaller = fitGroupLabels(['Control group', 'Drug A'], 60, 10, width)
+    expect(smaller.angle).toBe(0)
+    expect(smaller.size).toBeLessThan(10)
+    expect(smaller.lines[0]).toHaveLength(1)
+    expect(fitGroupLabels(['Wild-type control mice', 'Drug A'], 60, 10, width).lines[0]).toHaveLength(2)
+    expect(fitGroupLabels(['Wildtypecontrolmice', 'Drug'], 40, 10, width).angle).toBe(-45)
+    expect(fitGroupLabels(['Wildtypecontrolmice', 'Drug'], 6, 10, width).angle).toBe(-90)
+  })
+
+  it('keeps long group names apart and inside the chart, upright and lying down', () => {
+    const names = ['Wild-type mice treated with vehicle control (n=8)', 'Knockout mice treated with 10 mg/kg compound', 'Heterozygous littermates, untreated, 12 weeks']
+    for (const kind of ['bar', 'bar-h'] as const) {
+      const chart = { ...createChart(kind, 'sd', { width: 320, height: 240 }), groups: names.map((name, i) => ({ name, values: [i + 1, i + 2, i + 3] })) }
+      const boxes = groupBoxes(chart)
+      for (const [i, a] of boxes.entries()) {
+        expect(a.box.x).toBeGreaterThanOrEqual(-0.5)
+        expect(a.box.x + a.box.width).toBeLessThanOrEqual(chart.width + 0.5)
+        for (const b of boxes.slice(i + 1)) if (a.t.angle === undefined && a.t.role.kind === 'group' && b.t.role.kind === 'group' && a.t.role.index !== b.t.role.index) expect(meets(a.box, b.box)).toBe(false)
+      }
+    }
+  })
+
+  it('wraps a long chart name and keeps a long legend inside the chart', () => {
+    const groups = Array.from({ length: 12 }, (_, i) => ({ name: `Treatment ${i + 1}`, values: [i, i + 1, i + 2] }))
+    const chart = { ...createChart('bar', 'sd', { width: 320, height: 200 }, 'A rather long chart title that goes on and on across the whole figure width'), groups, legend: true }
+    const d = drawChart(chart)
+    const title = d.texts.filter((t) => t.role.kind === 'title')
+    expect(title.length).toBeGreaterThan(1)
+    for (const t of [...title, ...d.texts.filter((t) => t.role.kind === 'legend')]) {
+      const box = textBox(t, roughMeasure)
+      expect(box.x).toBeGreaterThanOrEqual(-0.5)
+      expect(box.x + box.width).toBeLessThanOrEqual(chart.width + 0.5)
+      expect(box.y + box.height).toBeLessThanOrEqual(chart.height + 0.5)
+    }
+  })
+
+  it('gives a short axis fewer numbers, so they never touch', () => {
+    const chart = { ...createChart('bar', 'none', { width: 320, height: 90 }), groups: [{ name: 'A', values: [3, 4] }, { name: 'B', values: [7, 9] }] }
+    const ticks = drawChart(chart).texts.filter((t) => t.role.kind === 'tick').map((t) => t.y).sort((a, b) => a - b)
+    for (let i = 1; i < ticks.length; i++) expect(ticks[i]! - ticks[i - 1]!).toBeGreaterThanOrEqual(chart.fontSize)
+  })
+
+  it('says when significance brackets crowd the plot, and only then', () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ name: `${i}`, values: [i * 10, i * 10 + 0.1, i * 10 - 0.1, i * 10 + 0.2] }))
+    expect(drawChart({ ...createChart('bar', 'sd', { width: 420, height: 240 }), groups: many, test: 'anova' }).crowded).toBe(true)
+    expect(drawChart({ ...createChart('bar', 'sd', { width: 420, height: 240 }), groups: many.slice(0, 3), test: 'anova' }).crowded).toBe(false)
+    expect(drawChart({ ...createChart('bar', 'sd', { width: 420, height: 240 }), groups: many, test: 'none' }).crowded).toBe(false)
+    // heightToFit finds the least height that clears it, capped by the room on the page.
+    const crowdedChart = { ...createChart('bar', 'sd', { width: 420, height: 240 }), groups: many, test: 'anova' as const }
+    const fit = heightToFit(crowdedChart, roughMeasure, 2000)!
+    expect(drawChart({ ...crowdedChart, height: fit }).crowded).toBe(false)
+    expect(drawChart({ ...crowdedChart, height: fit - 2 }).crowded).toBe(true)
+    expect(heightToFit(crowdedChart, roughMeasure, 260)).toBe(260)
+    expect(heightToFit({ ...crowdedChart, test: 'none' }, roughMeasure, 2000)).toBeUndefined()
+    // The same brackets on a chart tall enough to keep the plot readable: no hint.
+    expect(drawChart({ ...createChart('bar', 'sd', { width: 420, height: 720 }), groups: many, test: 'anova' }).crowded).toBe(false)
   })
 })

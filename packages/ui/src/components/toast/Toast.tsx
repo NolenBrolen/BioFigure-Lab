@@ -23,6 +23,10 @@ import { usePhoneLayout } from '../../lib/use-media-query'
 export type ToastData = {
   /** 0 to 1. Shows a progress line; give the toast `timeout: 0` so it stays. */
   progress?: number
+  /** A picture or icon shown before the title, e.g. a green tick. */
+  lead?: ReactNode
+  /** Let a long detail wrap onto more lines instead of being cut off (desktop only). */
+  wrap?: boolean
 }
 
 /** Put this once around the app, with a `ToastViewport` inside. */
@@ -47,13 +51,16 @@ export function ToastViewport({ contained }: ToastViewportProps) {
   const viewport = (
     <ToastPrimitive.Viewport
       className={cn(
-        'z-50 flex flex-col items-end gap-2 outline-none',
+        // Above dialogs (z-50) and their dimmed backdrop, so a message about the open dialog is seen
+        'z-60 flex flex-col items-end gap-2 outline-none',
         phone ? 'inset-x-3 bottom-[calc(var(--mobile-bar-height)+env(safe-area-inset-bottom,0px)+0.75rem)]' : 'right-4 bottom-4 w-[26rem] max-w-[calc(100%-2rem)]',
         contained ? 'absolute' : 'fixed',
       )}
     >
       {toasts.map((toast) => {
         const progress = toast.data?.progress
+        const lead = toast.data?.lead
+        const wrap = Boolean(toast.data?.wrap) && !phone
         return (
           <ToastPrimitive.Root
             key={toast.id}
@@ -64,11 +71,17 @@ export function ToastViewport({ contained }: ToastViewportProps) {
               'transition-[opacity,translate] duration-(--duration-base) ease-enter data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0',
             )}
           >
-            <ToastPrimitive.Content className={cn('flex items-center', phone ? 'gap-2' : 'gap-3')}>
+            <ToastPrimitive.Content className={cn('flex', wrap ? 'items-start' : 'items-center', phone ? 'gap-2' : 'gap-3')}>
+              {lead && <span className={cn('shrink-0', wrap && 'mt-0.5')}>{lead}</span>}
               {phone ? (
                 <div className="flex min-w-0 flex-1 flex-col">
                   <ToastPrimitive.Title className="truncate text-[0.9375rem] font-semibold" />
                   <ToastPrimitive.Description className="truncate text-xs text-muted-foreground" />
+                </div>
+              ) : wrap ? (
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <ToastPrimitive.Title className="font-medium" />
+                  <ToastPrimitive.Description className="text-xs text-muted-foreground" />
                 </div>
               ) : (
                 <>

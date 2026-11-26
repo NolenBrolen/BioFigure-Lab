@@ -81,6 +81,12 @@ export const CORRECTIONS: { id: Correction; name: string }[] = [
   { id: 'bh', name: 'Benjamini-Hochberg (FDR)' },
 ]
 
+/**
+ * The correction a test starts with: Bonferroni for Dunn's test after Kruskal-Wallis or Friedman (each p value multiplied
+ * by the number of comparisons), Holm-Šidák for everything else. A figure that saved its own choice keeps it.
+ */
+export const defaultCorrection = (test: StatTest): Correction => (test === 'kruskal' || test === 'friedman' ? 'bonferroni' : 'holmsidak')
+
 /** Tests that pair values by row: row 1 of each group is the same sample. */
 export const PAIRED_TESTS: ReadonlySet<StatTest> = new Set(['paired', 'wilcoxon', 'rmanova', 'friedman'])
 /** Tests that compare several p values, so the correction applies. */
@@ -310,10 +316,34 @@ export function oneWayAnova(groups: number[][]): { f: number; df1: number; df2: 
   const within = sum(used.map((g) => sum(g.map((x) => (x - meanOf(g)) ** 2))))
   const df1 = k - 1
   const df2 = n - k
+  // Every group constant: no spread inside the groups, so F can't be computed (see flatGroups).
+  if (used.every(isConstant)) return undefined
   const mse = within / df2
-  const f = mse === 0 ? Infinity : between / df1 / mse
-  return { f, df1, df2, p: Number.isFinite(f) ? 1 - jStat.centralF.cdf(f, df1, df2) : 0, mse, eta2: between / (between + within) }
+  const f = between / df1 / mse
+  const p = 1 - jStat.centralF.cdf(f, df1, df2)
+  const eta2 = between / (between + within)
+  // Values too large or too small to square would give NaN or Infinity: no result.
+  return [f, p, mse, eta2].every(Number.isFinite) ? { f, df1, df2, p: clampP(p), mse, eta2 } : undefined
 }
+
+const isConstant = (g: number[]) => g.every((x) => x === g[0])
+
+/**
+ * ANOVA-based tests need spread inside the groups. When every group's values
+ * are all the same: no variation at all gives no result; different group
+ * means give a result with a note and no brackets (F can't be computed).
+ */
+function flatGroups(groups: number[][], name: string): TestResult | undefined {
+  const used = groups.filter((g) => g.length > 0)
+  const n = sum(used.map((g) => g.length))
+  if (used.length < 2 || n - used.length < 1 || !used.every(isConstant)) return undefined
+  if (used.every((g) => g[0] === used[0]?.[0])) return undefined
+  return { comparisons: [], note: `${name}: the values in each group are all the same, so F can't be computed.` }
+}
+
+/** Tukey's test needs at least 2 degrees of freedom for the studentized range. */
+const tukeyTooSmall = (df: number) => !(df >= 2)
+const TOO_SMALL = "Too few values in each group for Tukey's test."
 
 /** Simpson's rule over [from, to] with an even number of steps. */
 function integrate(f: (x: number) => number, from: number, to: number, steps: number): number {
@@ -357,8 +387,9 @@ const anovaLine = (a: { df1: number; df2: number; f: number; p: number; eta2: nu
 
 function anovaTukey(groups: number[][], effect: boolean): TestResult | undefined {
   const anova = oneWayAnova(groups)
-  if (!anova) return undefined
+  if (!anova) return flatGroups(groups, 'One-way ANOVA')
   const k = groups.filter((g) => g.length > 0).length
+  if (tukeyTooSmall(anova.df2)) return { comparisons: [], note: `${anovaLine(anova, effect)}; ${TOO_SMALL}` }
   const comparisons: Comparison[] = []
   for (let a = 0; a < groups.length; a++)
     for (let b = a + 1; b < groups.length; b++) {
@@ -375,7 +406,8 @@ function anovaTukey(groups: number[][], effect: boolean): TestResult | undefined
 function anovaDunnett(groups: number[][], effect: boolean): TestResult | undefined {
   const anova = oneWayAnova(groups)
   const control = groups[0] ?? []
-  if (!anova || control.length === 0) return undefined
+  if (!anova) return control.length === 0 ? undefined : flatGroups(groups, 'One-way ANOVA')
+  if (control.length === 0) return undefined
   const others = groups.flatMap((g, i) => (i > 0 && g.length > 0 ? [{ g, i }] : []))
   if (others.length === 0) return undefined
   const lambdas = others.map(({ g }) => Math.sqrt(g.length / (g.length + control.length)))
@@ -393,7 +425,7 @@ function welchGamesHowell(groups: number[][], effect: boolean): TestResult | und
   const k = used.length
   if (k < 2) return undefined
   const v = used.map(({ g }) => varianceOf(g))
-  if (v.some((x) => x === 0)) return undefined
+  if (v.some((x) => x === 0 || !Number.isFinite(x))) return undefined
   const w = used.map(({ g }, j) => g.length / (v[j] ?? 1))
   const W = sum(w)
   const means = used.map(({ g }) => meanOf(g))
@@ -403,6 +435,7 @@ function welchGamesHowell(groups: number[][], effect: boolean): TestResult | und
   const df2 = (k * k - 1) / (3 * lambda)
   const p = 1 - jStat.centralF.cdf(f, k - 1, df2)
   const comparisons: Comparison[] = []
+  let skipped = false
   for (let x = 0; x < k; x++)
     for (let y = x + 1; y < k; y++) {
       const gx = used[x]
@@ -412,10 +445,15 @@ function welchGamesHowell(groups: number[][], effect: boolean): TestResult | und
       const sy = (v[y] ?? 0) / gy.g.length
       const q = Math.abs((means[x] ?? 0) - (means[y] ?? 0)) / Math.sqrt((sx + sy) / 2)
       const df = (sx + sy) ** 2 / (sx ** 2 / (gx.g.length - 1) + sy ** 2 / (gy.g.length - 1))
+      if (tukeyTooSmall(df)) {
+        skipped = true
+        continue
+      }
       comparisons.push({ a: gx.i, b: gy.i, p: clampP(1 - jStat.tukey.cdf(q, k, df)) })
     }
   const eta = oneWayAnova(used.map(({ g }) => g))
-  return { comparisons, note: `Welch's ANOVA, F(${k - 1}, ${fmt(df2)}) = ${fmt(f)}, ${formatP(p)}${effect && eta ? `, η² = ${fmt(eta.eta2)}` : ''}; Games-Howell multiple comparisons.` }
+  const tail = skipped ? "Games-Howell multiple comparisons; too few values in some groups for Games-Howell's test, those pairs are left out." : 'Games-Howell multiple comparisons.'
+  return { comparisons, note: `Welch's ANOVA, F(${k - 1}, ${fmt(df2)}) = ${fmt(f)}, ${formatP(p)}${effect && eta ? `, η² = ${fmt(eta.eta2)}` : ''}; ${tail}` }
 }
 
 /** The rows where every group has a value: the complete samples for repeated-measures tests. */
@@ -429,7 +467,32 @@ function completeRows(raw: (number | null)[][]): number[][] {
   return out
 }
 
-/** Repeated-measures ANOVA (rows are the samples), then Tukey's test with the error term. */
+/**
+ * Greenhouse-Geisser epsilon: how far the groups' differences stray from equal spread (sphericity). 1 means no
+ * departure, the lowest possible value is 1 / (groups - 1). Worked out from the covariance matrix of the groups
+ * over the samples, centred on its rows, columns and overall mean.
+ */
+export function geisserGreenhouseEpsilon(rows: number[][]): number {
+  const k = rows[0]?.length ?? 0
+  const n = rows.length
+  if (k < 3 || n < 2) return 1
+  const means = Array.from({ length: k }, (_, j) => meanOf(rows.map((r) => r[j] ?? 0)))
+  const cov = Array.from({ length: k }, (_, a) => Array.from({ length: k }, (_, b) => sum(rows.map((r) => ((r[a] ?? 0) - (means[a] ?? 0)) * ((r[b] ?? 0) - (means[b] ?? 0)))) / (n - 1)))
+  const rowMean = cov.map(meanOf)
+  const all = meanOf(rowMean)
+  const centred = cov.map((row, a) => row.map((c, b) => c - (rowMean[a] ?? 0) - (rowMean[b] ?? 0) + all))
+  const trace = sum(centred.map((row, a) => row[a] ?? 0))
+  const squares = sum(centred.flat().map((c) => c * c))
+  const epsilon = trace ** 2 / ((k - 1) * squares)
+  return Number.isFinite(epsilon) ? Math.min(1, Math.max(1 / (k - 1), epsilon)) : 1
+}
+
+/**
+ * Repeated-measures ANOVA (rows are the samples) without assuming sphericity: the degrees of
+ * freedom are multiplied by the Geisser-Greenhouse epsilon before the p value is read off. The pairs are then
+ * compared with Tukey's test, each pair on its own differences only (a paired t-test with n - 1 degrees of
+ * freedom), so one group's spread doesn't leak into another pair.
+ */
 function repeatedAnova(raw: (number | null)[][], effect: boolean): TestResult | undefined {
   const rows = completeRows(raw)
   const k = raw.length
@@ -442,20 +505,28 @@ function repeatedAnova(raw: (number | null)[][], effect: boolean): TestResult | 
   const ssSubject = k * sum(rowMeans.map((m) => (m - grand) ** 2))
   const ssTotal = sum(rows.flat().map((x) => (x - grand) ** 2))
   const ssError = ssTotal - ssTreat - ssSubject
-  const df1 = k - 1
-  const df2 = (k - 1) * (n - 1)
-  const mse = ssError / df2
+  const epsilon = geisserGreenhouseEpsilon(rows)
+  const df1 = (k - 1) * epsilon
+  const df2 = (k - 1) * (n - 1) * epsilon
+  const mse = ssError / ((k - 1) * (n - 1))
   if (mse <= 0) return undefined
-  const f = ssTreat / df1 / mse
+  const f = ssTreat / (k - 1) / mse
   const p = 1 - jStat.centralF.cdf(f, df1, df2)
+  const partialEta = ssTreat / (ssTreat + ssError)
+  if (![f, p, partialEta].every(Number.isFinite)) return undefined
+  const line = `Repeated-measures ANOVA (${n} samples), Geisser-Greenhouse corrected, ε = ${fmt(epsilon)}, F(${fmt(df1)}, ${fmt(df2)}) = ${fmt(f)}, ${formatP(p)}${effect ? `, partial η² = ${fmt(partialEta)}` : ''}`
+  const pairDf = n - 1
+  if (tukeyTooSmall(pairDf)) return { comparisons: [], note: `${line}; ${TOO_SMALL}` }
   const comparisons: Comparison[] = []
   for (let a = 0; a < k; a++)
     for (let b = a + 1; b < k; b++) {
-      const q = Math.abs((colMeans[a] ?? 0) - (colMeans[b] ?? 0)) / Math.sqrt(mse / n)
-      comparisons.push({ a, b, p: clampP(1 - jStat.tukey.cdf(q, k, df2)) })
+      const d = rows.map((r) => (r[a] ?? 0) - (r[b] ?? 0))
+      const spread = Math.sqrt(varianceOf(d) / n)
+      const md = meanOf(d)
+      const pValue = spread === 0 ? (md === 0 ? 1 : 0) : clampP(1 - jStat.tukey.cdf((Math.abs(md) / spread) * Math.SQRT2, k, pairDf))
+      comparisons.push({ a, b, p: pValue })
     }
-  const partialEta = ssTreat / (ssTreat + ssError)
-  return { comparisons, note: `Repeated-measures ANOVA (${n} samples), F(${df1}, ${df2}) = ${fmt(f)}, ${formatP(p)}${effect ? `, partial η² = ${fmt(partialEta)}` : ''}; Tukey's multiple comparisons.` }
+  return { comparisons, note: `${line}; Tukey's multiple comparisons, each pair on its own differences.` }
 }
 
 /** Kruskal-Wallis with the tie correction, then Dunn's test between every pair. */
@@ -543,13 +614,54 @@ export function pearson(xs: number[], ys: number[]): { r: number; p: number } | 
   return { r, p: twoSidedT((r * Math.sqrt(n - 2)) / Math.sqrt(1 - r * r), n - 2) }
 }
 
+/** Spearman's exact p is worked out for this many pairs or fewer when nothing is tied (a slower search could go further, ties included). */
+export const SPEARMAN_EXACT_MAX = 10
+
+/**
+ * Exact two-sided p of Spearman's r for n pairs with no ties: the share of all n! orderings whose sum of squared
+ * rank differences is as small as this one (or as large as its mirror image). The orderings are counted by
+ * filling the places one at a time, remembering which ranks are used and the sum so far.
+ */
+export function spearmanExactP(n: number, sumSquares: number): number {
+  const top = (n * (n * n - 1)) / 3
+  const counts: Float64Array[] = Array.from({ length: 1 << n }, () => new Float64Array(0))
+  counts[0] = new Float64Array(top + 1)
+  counts[0][0] = 1
+  for (let mask = 0; mask < 1 << n; mask++) {
+    const here = counts[mask]
+    if (!here || here.length === 0) continue
+    let place = 0
+    for (let b = 0; b < n; b++) if (mask & (1 << b)) place++
+    for (let j = 0; j < n; j++) {
+      if (mask & (1 << j)) continue
+      const next = mask | (1 << j)
+      const target = counts[next] && counts[next].length > 0 ? counts[next] : (counts[next] = new Float64Array(top + 1))
+      const step = (place - j) ** 2
+      for (let t = 0; t + step <= top; t++) if (here[t]) target[t + step] = (target[t + step] ?? 0) + (here[t] ?? 0)
+    }
+    if (mask !== (1 << n) - 1) counts[mask] = new Float64Array(0)
+  }
+  const all = counts[(1 << n) - 1] ?? new Float64Array(0)
+  const limit = Math.min(sumSquares, top - sumSquares)
+  let atLeast = 0
+  for (let t = 0; t <= limit; t++) atLeast += all[t] ?? 0
+  let total = 1
+  for (let i = 2; i <= n; i++) total *= i
+  return clampP((2 * atLeast) / total)
+}
+
 function correlation(test: 'pearson' | 'spearman' | 'regression', raw: (number | null)[][], names: string[] | undefined): TestResult | undefined {
   const pts = points(raw, names)
   const xs = pts.map((pt) => pt.x)
   const ys = pts.map((pt) => pt.y)
   if (test === 'spearman') {
-    const result = pearson(rank(xs).ranks, rank(ys).ranks)
-    return result && { comparisons: [], note: `Spearman correlation, r = ${fmt(result.r)}, n = ${pts.length}, ${formatP(result.p)}.` }
+    const rx = rank(xs)
+    const ry = rank(ys)
+    const result = pearson(rx.ranks, ry.ranks)
+    if (!result) return undefined
+    const exact = pts.length <= SPEARMAN_EXACT_MAX && rx.ties.length === 0 && ry.ties.length === 0
+    const pValue = exact ? spearmanExactP(pts.length, sum(rx.ranks.map((r, i) => (r - (ry.ranks[i] ?? 0)) ** 2))) : result.p
+    return { comparisons: [], note: `Spearman correlation, r = ${fmt(result.r)}, n = ${pts.length}, ${formatP(pValue)} (${exact ? 'exact' : 'approximate, from t'}).` }
   }
   const result = pearson(xs, ys)
   if (!result) return undefined
@@ -650,7 +762,7 @@ function againstFirst(raw: (number | null)[][], test: (first: (number | null)[],
   const first = raw[0] ?? []
   const found = raw.slice(1).flatMap((other, i) => {
     const p = test(first, other)
-    return p === undefined ? [] : [{ a: 0, b: i + 1, p }]
+    return p === undefined || !Number.isFinite(p) ? [] : [{ a: 0, b: i + 1, p }]
   })
   if (found.length === 0) return undefined
   const adjusted = adjust(found.map((c) => c.p), correction)
@@ -665,7 +777,7 @@ function againstFirst(raw: (number | null)[][], test: (first: (number | null)[],
 function againstValue(raw: (number | null)[][], test: (values: number[]) => number | undefined, name: string, value: number, correction: Correction): TestResult | undefined {
   const found = raw.flatMap((g, i) => {
     const p = test(numbers(g))
-    return p === undefined ? [] : [{ a: i, b: i, p }]
+    return p === undefined || !Number.isFinite(p) ? [] : [{ a: i, b: i, p }]
   })
   if (found.length === 0) return undefined
   const adjusted = adjust(found.map((c) => c.p), correction)
@@ -683,13 +795,24 @@ const differences = (a: (number | null)[], b: (number | null)[]) =>
     return isNumber(x) && isNumber(y) ? [y - x] : []
   })
 
+/**
+ * Nothing non-finite reaches a note, a comparison or a bracket: a comparison
+ * whose p isn't a number is left out, and a note with NaN or Infinity in it
+ * (values too large or small to work with) gives no result.
+ */
+function clean(result: TestResult | undefined): TestResult | undefined {
+  if (!result) return undefined
+  if (/NaN|Infinity/.test(result.note)) return undefined
+  return { ...result, comparisons: result.comparisons.filter((c) => Number.isFinite(c.p)) }
+}
+
 /** The last results, so a chart redrawn with the same numbers doesn't work its test out again. */
 const recent = new Map<string, TestResult | undefined>()
 
 export function runTest(test: StatTest, groupValues: (number | null)[][], options: TestOptions = {}): TestResult | undefined {
   const key = JSON.stringify([test, groupValues, options])
   if (recent.has(key)) return recent.get(key)
-  const result = computeTest(test, groupValues, options)
+  const result = clean(computeTest(test, groupValues, options))
   if (recent.size > 50) recent.delete(recent.keys().next().value ?? '')
   recent.set(key, result)
   return result
@@ -697,7 +820,7 @@ export function runTest(test: StatTest, groupValues: (number | null)[][], option
 
 function computeTest(test: StatTest, groupValues: (number | null)[][], options: TestOptions): TestResult | undefined {
   const groups = groupValues.map(numbers)
-  const correction = options.correction ?? 'holmsidak'
+  const correction = options.correction ?? defaultCorrection(test)
   const effect = options.effectSize ?? false
   const value = options.value ?? 0
   const useWelch = options.welch ?? true
@@ -755,7 +878,13 @@ function computeTest(test: StatTest, groupValues: (number | null)[][], options: 
     }
     case 'brownforsythe': {
       const r = brownForsythe(groups)
-      return r && { comparisons: [], note: `Brown-Forsythe test for equal spread, F(${r.df1}, ${r.df2}) = ${fmt(r.f)}, ${formatP(r.p)} (p < 0.05: the groups spread differently).` }
+      if (!r) {
+        // The test runs an ANOVA on each value's distance from its group's median. With 2 values per
+        // group (or values spread evenly round the median) those distances are equal within each group.
+        const flat = flatGroups(groups.filter((g) => g.length > 0).map((g) => g.map((x) => Math.abs(x - median(g)))), 'Brown-Forsythe test for equal spread')
+        return flat && { comparisons: [], note: 'Brown-Forsythe test for equal spread: too few different values in each group to compare their spread.' }
+      }
+      return { comparisons: [], note: `Brown-Forsythe test for equal spread, F(${r.df1}, ${r.df2}) = ${fmt(r.f)}, ${formatP(r.p)} (p < 0.05: the groups spread differently).` }
     }
     case 'none':
       return undefined

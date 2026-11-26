@@ -36,6 +36,8 @@ export type PopoverProps = {
   className?: string
   /** A line under the title bar (on by default). */
   divider?: boolean
+  /** Where focus goes when it closes (Base UI's `finalFocus`); by default back to the button. */
+  finalFocus?: PopoverPrimitive.Popup.Props['finalFocus']
 }
 
 /**
@@ -48,7 +50,7 @@ function leftForKeeper(event: Event): boolean {
   return to instanceof Element && to.closest('[data-keeps-popups-open]') !== null
 }
 
-export function Popover({ title, trigger, children, side = 'bottom', align = 'start', alignOffset, open, onOpenChange, defaultOpen, className, divider = true }: PopoverProps) {
+export function Popover({ title, trigger, children, side = 'bottom', align = 'start', alignOffset, open, onOpenChange, defaultOpen, className, divider = true, finalFocus }: PopoverProps) {
   const expanded = useExpandedControls()
   if (expanded) {
     return (
@@ -71,6 +73,7 @@ export function Popover({ title, trigger, children, side = 'bottom', align = 'st
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Positioner side={side} align={align} alignOffset={alignOffset} sideOffset={6} className="z-50">
           <PopoverPrimitive.Popup
+            finalFocus={finalFocus}
             className={cn(
               'rounded-md border bg-popover text-sm text-popover-foreground shadow-lg outline-none',
               'origin-(--transform-origin) transition-[opacity,scale] duration-(--duration-fast) ease-enter',

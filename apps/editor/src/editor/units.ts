@@ -2,6 +2,9 @@
 export const PX_PER_MM = 96 / 25.4
 
 export const mmToPx = (mm: number) => mm * PX_PER_MM
+
+/** How far in from the page edge the margin snap lines sit, in mm; a new chart fills the area inside them. */
+export const PAGE_MARGIN_MM = 4
 export const pxToMm = (px: number) => px / PX_PER_MM
 
 /** A length in mm with at most one decimal, e.g. "30.5". */

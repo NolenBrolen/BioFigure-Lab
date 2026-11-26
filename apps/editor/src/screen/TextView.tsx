@@ -24,11 +24,12 @@ const FONT_OPTIONS: FontOption[] = FONTS.map((font) => ({ name: font.name, categ
 
 /**
  * `forShapes`: the Text tab of the Shapes panel. It styles the selected
- * shape's text (typed in or not) and the next shape's text. `stacked`: the
+ * shape's text (typed in or not) and the next shape's text. `forCaption`: the
+ * Text tab of a framed icon, styling its caption (BIO-73). `stacked`: the
  * older layout with sections, labels above the controls.
  */
-export function TextStyleControls({ figure, style, forShapes, stacked = false, className }: { figure: FigureCanvas | null; style: TextStyle; forShapes?: boolean; stacked?: boolean; className?: string }) {
-  const change = (patch: Partial<TextStyle>) => void (forShapes ? figure?.changeShapeText(patch) : figure?.changeText(patch))
+export function TextStyleControls({ figure, style, forShapes, forCaption, stacked = false, className }: { figure: FigureCanvas | null; style: TextStyle; forShapes?: boolean; forCaption?: boolean; stacked?: boolean; className?: string }) {
+  const change = (patch: Partial<TextStyle>) => void (forCaption ? figure?.setCaptionStyle(patch) : forShapes ? figure?.changeShapeText(patch) : figure?.changeText(patch))
   const value: TextControlsValue = { ...style, size: Math.round((style.size / PX_PER_PT) * 10) / 10 }
   return (
     <TextControls
@@ -39,8 +40,9 @@ export function TextStyleControls({ figure, style, forShapes, stacked = false, c
       fonts={FONT_OPTIONS}
       weights={FONT_WEIGHTS}
       onChange={({ size, ...patch }) => change({ ...patch, ...(size !== undefined && { size: size * PX_PER_PT }) })}
-      onPreview={(change) => void figure?.previewText(change)}
-      onSymbol={(symbol) => figure?.insertSymbol(symbol)}
+      // A caption has no live preview while hovering fonts: it is laid out again on every change.
+      onPreview={forCaption ? undefined : (change) => void figure?.previewText(change)}
+      onSymbol={(symbol) => (forCaption ? figure?.addCaptionSymbol(symbol) : figure?.insertSymbol(symbol))}
     />
   )
 }

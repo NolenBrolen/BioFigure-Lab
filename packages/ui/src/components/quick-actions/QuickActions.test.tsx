@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { CopyPlus, Lock, Trash2 } from 'lucide-react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -63,5 +63,45 @@ describe('QuickActions', () => {
     if (!picker) throw new Error('no colour picker')
     fireEvent.change(picker, { target: { value: '#ff0000' } })
     expect(onFill).toHaveBeenCalledWith('#ff0000')
+  })
+
+  it('opens a widget from its button, which can close it again after a pick', async () => {
+    const onPick = vi.fn()
+    const { user } = setup(
+      <QuickActions
+        label="Table actions"
+        groups={[
+          {
+            id: 'own',
+            actions: [
+              {
+                id: 'row',
+                label: 'Row',
+                icon: Lock,
+                widget: {
+                  title: 'Row',
+                  content: (close) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPick()
+                        close()
+                      }}
+                    >
+                      Add row above
+                    </button>
+                  ),
+                },
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Add row above' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Row' }))
+    await user.click(await screen.findByRole('button', { name: 'Add row above' }))
+    expect(onPick).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add row above' })).not.toBeInTheDocument())
   })
 })

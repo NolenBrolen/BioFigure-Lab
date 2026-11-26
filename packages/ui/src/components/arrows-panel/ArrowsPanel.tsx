@@ -9,7 +9,7 @@
  */
 import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 
-import { ARROW_PRESETS, LINE_STYLES, ROUTES, drawArrow, type ArrowLook, type ArrowPreset, type LineStyle, type Route, type XY } from '../../lib/arrow-geometry'
+import { ARROW_PRESETS, LINE_STYLES, ROUTES, arrowStrokes, drawArrow, type ArrowLook, type ArrowPreset, type LineStyle, type Route, type XY } from '../../lib/arrow-geometry'
 import { cn } from '../../lib/cn'
 import { DrawTile } from '../draw-tile/DrawTile'
 import { Tooltip } from '../tooltip/Tooltip'
@@ -37,12 +37,10 @@ const PREVIEW_ENDS: Record<Route, [XY, XY]> = {
 /** A small picture of an arrow, drawn with the same geometry as the canvas. */
 export function ArrowPicture({ look, className }: { look: ArrowLook; className?: string }) {
   const [a, b] = PREVIEW_ENDS[look.route]
-  const drawing = drawArrow(a, b, look, 2)
   return (
-    <svg aria-hidden viewBox="0 0 64 32" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d={drawing.shaft} strokeDasharray={drawing.dash?.join(' ')} />
-      {drawing.parts.map((part, i) => (
-        <path key={i} d={part.d} fill={part.filled ? 'currentColor' : 'none'} />
+    <svg aria-hidden viewBox="0 0 64 32" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeMiterlimit={10}>
+      {arrowStrokes(drawArrow(a, b, look, 2), 2).map((part, i) => (
+        <path key={i} d={part.d} fill={part.filled ? 'currentColor' : 'none'} stroke={part.width > 0 ? 'currentColor' : 'none'} strokeWidth={part.width} strokeLinecap={part.cap} strokeLinejoin={part.join} strokeDasharray={part.dash?.join(' ')} />
       ))}
     </svg>
   )
@@ -116,12 +114,22 @@ export function ArrowsPanel({ route, line, onRouteChange, onLineChange, picked, 
       </div>
       <section aria-label="Arrow ends">
         <h3 className="section-label flex h-7 items-center">Ends</h3>
-        <div className="grid grid-cols-3 gap-2">
-          {ARROW_PRESETS.map((preset) => (
-            <DrawTile key={preset.id} name={preset.name} title={`Draw ${preset.name.toLowerCase()} arrow`} picked={preset.id === picked} onClick={() => onPick(preset)} picture={<ArrowPicture look={{ route, line, start: preset.start, end: preset.end, mid: preset.mid }} />} />
-          ))}
-        </div>
+        <ArrowEndTiles route={route} line={line} picked={picked} onPick={onPick} />
       </section>
+    </div>
+  )
+}
+
+/**
+ * The end tiles alone, drawn in the given path and line. Also the arrow's Ends
+ * widget in the quick-actions bar (BIO-82), so both always offer the same ends.
+ */
+export function ArrowEndTiles({ route, line, picked, onPick, drawTitles = true, className }: Pick<ArrowsPanelProps, 'route' | 'line' | 'picked' | 'onPick' | 'className'> & { /** Tooltips say "Draw … arrow"; off, they give only the end's name. */ drawTitles?: boolean }) {
+  return (
+    <div className={cn('grid grid-cols-3 gap-2', className)}>
+      {ARROW_PRESETS.map((preset) => (
+        <DrawTile key={preset.id} name={preset.name} title={drawTitles ? `Draw ${preset.name.toLowerCase()} arrow` : preset.name} picked={preset.id === picked} onClick={() => onPick(preset)} picture={<ArrowPicture look={{ route, line, start: preset.start, end: preset.end, mid: preset.mid }} />} />
+      ))}
     </div>
   )
 }

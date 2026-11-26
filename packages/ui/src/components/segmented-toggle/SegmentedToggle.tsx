@@ -96,7 +96,7 @@ export function SegmentedToggle<T extends string>({ options, value, onValueChang
                 ? 'flex min-w-0 flex-col items-center justify-center gap-0.5 px-1 text-[11px] leading-none'
                 : showLabels
                   ? 'flex min-w-0 items-center justify-center gap-1 px-1 text-xs'
-                  : 'grid w-7 place-items-center',
+                  : 'grid min-w-7 place-items-center',
               'transition-colors duration-(--duration-instant) hover:text-foreground data-pressed:text-foreground',
               'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
             )}

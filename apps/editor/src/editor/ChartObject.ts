@@ -14,8 +14,11 @@
  */
 import { Control, FabricObject, Point, classRegistry, util, type TMat2D } from 'fabric'
 
-import { chartSvg, columnHalf, drawChart, textBox, textLeft, TITLE_WEIGHT, withDefaults, type ChartData, type ChartDrawing, type ChartText, type Measure } from './chart-model'
+import type { ChartLine } from './chart-axis-style'
+import { chartSvg, columnHalf, dotCorners, drawChart, textBox, textLeft, TITLE_WEIGHT, withDefaults, type ChartData, type ChartDrawing, type ChartText, type Measure } from './chart-model'
+import { fillScriptText, keepScripts, scriptMeasure } from './chart-text'
 import type { XY } from './geometry'
+import { isXy } from '@biofigure-lab/ui/lib/graph-kinds'
 
 /** What Fabric reports as the action while the space between groups is dragged. */
 export const SPACING_ACTION = 'chartSpacing'
@@ -61,6 +64,9 @@ export class ChartObject extends FabricObject {
     })
   }
 
+  /** The text being typed in place (chart-label-editor.ts), left undrawn while the text box over it shows it. */
+  editingText: ChartText['role'] | undefined
+
   /** The spacing or bar-width handle under the pointer, lit up while the chart is selected. */
   hoverHandle: string | undefined
   /** The handle being dragged, and how things were when the drag started. */
@@ -99,7 +105,8 @@ export class ChartObject extends FabricObject {
   /** Put new data or settings in, keeping the top-left corner where it is. */
   setChart(chart: ChartData): void {
     const corner = this.getPointByOrigin('left', 'top')
-    this.chart = chart
+    // Text changed as plain text keeps its sub- and superscripts in place.
+    this.chart = keepScripts(this.chart, chart)
     this.set({ width: chart.width, height: chart.height, dirty: true })
     this.loadFont()
     this.setPositionByOrigin(corner, 'left', 'top')
@@ -126,13 +133,16 @@ export class ChartObject extends FabricObject {
     const corner = this.getPointByOrigin('left', 'top')
     this.set({ scaleX: 1, scaleY: 1 })
     this.setPositionByOrigin(corner, 'left', 'top')
-    this.setChart({ ...this.chart, width, height })
+    // Resized by hand: this is now the chart's own size, so it no longer shrinks back after growing to fit brackets.
+    this.setChart({ ...this.chart, width, height, grown: undefined })
   }
 
   _render(ctx: CanvasRenderingContext2D): void {
     const d = this.drawing()
     ctx.save()
     ctx.translate(-this.width / 2, -this.height / 2)
+    // The grid first, behind the data.
+    for (const l of d.gridLines) strokeLine(ctx, l)
     for (const r of d.rects) {
       ctx.fillStyle = r.fill
       ctx.fillRect(r.x, r.y, r.width, r.height)
@@ -154,19 +164,18 @@ export class ChartObject extends FabricObject {
       p.points.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)))
       ctx.strokeStyle = p.colour
       ctx.lineWidth = p.width
+      ctx.setLineDash(p.dash ?? [])
       ctx.stroke()
+      ctx.setLineDash([])
     }
-    for (const l of d.lines) {
-      ctx.beginPath()
-      ctx.moveTo(l.x1, l.y1)
-      ctx.lineTo(l.x2, l.y2)
-      ctx.strokeStyle = l.colour
-      ctx.lineWidth = l.width
-      ctx.stroke()
-    }
+    for (const l of d.lines) strokeLine(ctx, l)
     for (const dot of d.dots) {
       ctx.beginPath()
-      ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2)
+      const corners = dotCorners(dot)
+      if (corners) {
+        corners.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)))
+        ctx.closePath()
+      } else ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2)
       ctx.fillStyle = dot.fill
       ctx.fill()
       if (dot.stroke) {
@@ -177,17 +186,29 @@ export class ChartObject extends FabricObject {
     }
     ctx.textBaseline = 'alphabetic'
     ctx.textAlign = 'left'
+    const measure = scriptMeasure(measureText)
+    const editing = this.editingText
     for (const t of d.texts) {
-      ctx.font = `${t.bold ? TITLE_WEIGHT : 400} ${t.size}px ${t.font}`
+      if (editing && t.role.kind === editing.kind && (t.role.kind !== 'group' || editing.kind !== 'group' || t.role.index === editing.index)) continue
+      const fontFor = (size: number) => `${t.bold ? TITLE_WEIGHT : 400} ${size}px ${t.font}`
+      ctx.font = fontFor(t.size)
       ctx.fillStyle = t.colour
-      const width = measureText(t.text, t.size, t.font, t.bold)
+      const width = measure(t.text, t.size, t.font, t.bold)
+      // Sub- and superscript parts are drawn smaller and off the line; plain text is one fillText as before.
+      const fill = (x: number, y: number) => fillScriptText(ctx, t.text, x, y, t.size, fontFor, measureText, t.font, t.bold)
       if (t.rotate) {
         ctx.save()
         ctx.translate(t.x, t.y)
         ctx.rotate(-Math.PI / 2)
-        ctx.fillText(t.text, -width / 2, t.size * 0.35)
+        fill(-width / 2, t.size * 0.35)
         ctx.restore()
-      } else ctx.fillText(t.text, textLeft(t, width), t.y)
+      } else if (t.angle) {
+        ctx.save()
+        ctx.translate(t.x, t.y)
+        ctx.rotate((t.angle * Math.PI) / 180)
+        fill(textLeft(t, width) - t.x, 0)
+        ctx.restore()
+      } else fill(textLeft(t, width), t.y)
     }
     ctx.restore()
   }
@@ -202,6 +223,20 @@ export class ChartObject extends FabricObject {
 }
 
 classRegistry.setClass(ChartObject)
+
+/** One straight line; a dashed one has flat ends, so its dashes and dots keep their length. */
+function strokeLine(ctx: CanvasRenderingContext2D, l: ChartLine): void {
+  ctx.beginPath()
+  ctx.moveTo(l.x1, l.y1)
+  ctx.lineTo(l.x2, l.y2)
+  ctx.strokeStyle = l.colour
+  ctx.lineWidth = l.width
+  ctx.lineCap = l.dash ? 'butt' : 'square'
+  ctx.setLineDash(l.dash ?? [])
+  ctx.stroke()
+  ctx.setLineDash([])
+  ctx.lineCap = 'square'
+}
 
 /** From the chart's own space (centre at 0, 0) to the screen, with zoom, scroll and rotation. */
 const toScreen = (object: ChartObject): TMat2D => util.multiplyTransformMatrices(object.getViewportTransform(), object.calcTransformMatrix())
@@ -260,6 +295,8 @@ function gapControl(index: number): Control {
   const control: Control = new Control({
     actionName: SPACING_ACTION,
     cursorStyleHandler: (_event, _control, object) => ((object as ChartObject).drawing().horizontal ? 'ns-resize' : 'ew-resize'),
+    // A heatmap's cells fill the grid, and an XY chart has no groups side by side: there are no gaps to drag.
+    getVisibility: (object: ChartObject) => object.chart.kind !== 'heatmap' && !isXy(object.chart.kind),
     positionHandler: (_dim, _finalMatrix, object: ChartObject) => {
       const { plot, horizontal } = object.drawing()
       const scale = screenScale(object)

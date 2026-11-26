@@ -2,9 +2,11 @@
 import '../test/canvas-stub'
 
 import { IText, Rect, type FabricObject, type Group } from 'fabric'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FigureCanvas, type CanvasState } from './FigureCanvas'
+import type { Connector } from './Connector'
+import type { TableObject } from './TableObject'
 import { libraryIcons, loadIconSvg } from './icon-library'
 import { labelCorners, labelOf, bracketTextArea } from './shape-text'
 
@@ -593,6 +595,84 @@ describe('the look of new shapes', () => {
     expect(armOnPage()).toBeCloseTo(arm, 1)
   })
 
+  it('an arrow drawn by hand nearly level comes out straight; with Alt it stays as drawn', () => {
+    const f = makeFigure()
+    f.setTool('arrow')
+    pointer(f).drag([100, 300], [400, 312])
+    const [a, b] = (f.canvas.getActiveObject() as Connector).pagePoints()
+    expect(b.y).toBeCloseTo(a.y)
+    f.setTool('arrow')
+    const upper = f.canvas.upperCanvasEl
+    upper.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, clientY: 500, bubbles: true, button: 0, buttons: 1 }))
+    for (let step = 1; step <= 5; step++) document.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 + 60 * step, clientY: 500 + 2.4 * step, bubbles: true, buttons: 1, altKey: true }))
+    document.dispatchEvent(new MouseEvent('mouseup', { clientX: 400, clientY: 512, bubbles: true, altKey: true }))
+    const [c, d] = (f.canvas.getActiveObject() as Connector).pagePoints()
+    expect(d.y - c.y).toBeGreaterThan(5)
+  })
+
+  it("an arrow's box handles move its ends, keeping its thickness and the held side, also while dragging", () => {
+    const f = makeFigure()
+    const arrow = f.addShape({ kind: 'arrow', points: [100, 300, 400, 300], look: { route: 'straight', line: 'solid', start: 'none', end: 'filled', mid: 'none' }, stroke: '#1f2937', strokeWidth: 20 }) as Connector
+    f.canvas.setActiveObject(arrow)
+    const left = arrow.getPointByOrigin('left', 'center').x
+    // Its right side dragged to twice the width, the left side held.
+    arrow.set({ scaleX: 2 })
+    arrow.setPositionByOrigin(arrow.getPointByOrigin('left', 'center').setX(left), 'left', 'center')
+    f.canvas.fire('object:scaling', { target: arrow, e: new MouseEvent('mousemove'), transform: { corner: 'mr', originX: 'left', originY: 'center', original: { scaleX: 1, scaleY: 1 } } } as never)
+    expect(arrow.scaleX).toBe(1)
+    expect(arrow.strokeWidth).toBe(20)
+    expect(arrow.getPointByOrigin('left', 'center').x).toBeCloseTo(left)
+    const [start, end] = arrow.pagePoints()
+    expect(start.x).toBeCloseTo(100)
+    expect(end.x).toBeGreaterThan(650)
+    expect(end.y).toBeCloseTo(300)
+  })
+
+  it('a level arrow has no top and bottom handles; a slanting one has all four sides', () => {
+    const f = makeFigure()
+    const level = f.addShape({ kind: 'arrow', points: [100, 300, 400, 300], look: { route: 'straight', line: 'solid', start: 'none', end: 'filled', mid: 'none' }, stroke: '#1f2937', strokeWidth: 2 }) as Connector
+    expect([level.isControlVisible('mt'), level.isControlVisible('ml'), level.isControlVisible('br')]).toEqual([false, true, true])
+    const slanting = f.addShape({ kind: 'arrow', points: [100, 300, 400, 500], look: { route: 'straight', line: 'solid', start: 'none', end: 'filled', mid: 'none' }, stroke: '#1f2937', strokeWidth: 2 }) as Connector
+    expect([slanting.isControlVisible('mt'), slanting.isControlVisible('ml')]).toEqual([true, true])
+  })
+
+  it('an arrow preset sets the colour and outline in one step', async () => {
+    const f = makeFigure()
+    const arrow = f.addShape({ kind: 'arrow', points: [100, 300, 500, 300], look: { route: 'straight', line: 'solid', start: 'none', end: 'filled', mid: 'none' }, stroke: '#1f2937', strokeWidth: 40 }) as Connector
+    f.canvas.setActiveObject(arrow)
+    f.setArrowStyle({ colour: '#d55e00', outline: '#8a3d00' })
+    // A 40 px arrow gets a 4 px outline.
+    expect(arrow).toMatchObject({ stroke: '#d55e00', outline: '#8a3d00', outlineWidth: 4 })
+    f.undo()
+    await settle()
+    const back = f.canvas.getObjects()[0] as Connector
+    expect([back.stroke, back.outline]).toEqual(['#1f2937', undefined])
+  })
+
+  it("sets a selected arrow's outline, shows it, undoes the colour and the width drag as one step each, and saves it", async () => {
+    const f = makeFigure()
+    let state: CanvasState | undefined
+    f.subscribe((next) => (state = next))
+    const arrow = f.addShape({ kind: 'arrow', points: [100, 300, 500, 300], look: { route: 'straight', line: 'solid', start: 'none', end: 'filled', mid: 'none' }, stroke: '#e11d48', strokeWidth: 20 }) as FabricObject & { outline?: string; outlineWidth?: number }
+    f.canvas.setActiveObject(arrow)
+    const height = arrow.height
+    f.setArrowStyle({ outline: '#1f2937' })
+    expect(state?.selection?.arrowStyle).toEqual({ outline: '#1f2937', outlineWidth: 2 })
+    // The box grows to take in the outline, at least 2 px on each side (more round the head's sharp tips).
+    expect(arrow.height).toBeGreaterThanOrEqual(height + 4)
+    f.setArrowStyle({ outlineWidth: 3 })
+    f.setArrowStyle({ outlineWidth: 4 })
+    const saved = f.canvas.getObjects()[0]!.toObject() as { outline?: string; outlineWidth?: number }
+    expect(saved).toMatchObject({ outline: '#1f2937', outlineWidth: 4 })
+    // The width drag is one step back to 2 px; then the colour pick.
+    f.undo()
+    await settle()
+    expect((f.canvas.getObjects()[0] as typeof arrow).outlineWidth).toBe(2)
+    f.undo()
+    await settle()
+    expect((f.canvas.getObjects()[0] as typeof arrow).outline).toBeUndefined()
+  })
+
   it('a click between the brackets of a double bracket picks what is behind it, not the bracket', () => {
     const f = makeFigure()
     const behind = addBox(f)
@@ -961,6 +1041,91 @@ describe('placing a chart with a click', () => {
     expect(box.left).toBeGreaterThanOrEqual(0)
     expect(box.left + box.width).toBeLessThanOrEqual(1000)
   })
+
+  it('fills the page margins on an empty page, and starts at half the page width once something is there', async () => {
+    const f = makeFigure()
+    const { ChartObject } = await import('./ChartObject')
+    const charts = () => f.canvas.getObjects().filter((object) => object instanceof ChartObject)
+    f.setTool('chart')
+    pointer(f).click(500, 400)
+    const first = charts()[0]!.getBoundingRect()
+    const margin = (4 * 96) / 25.4
+    expect(first.width).toBeCloseTo(1000 - 2 * margin, 0)
+    expect(first.height).toBeCloseTo(800 - 2 * margin, 0)
+    f.setTool('chart')
+    // In the margin strip, so the click doesn't land on the first chart (which would grab it).
+    pointer(f).click(2, 2)
+    const second = charts()[1]!.getBoundingRect()
+    expect(second.width).toBeCloseTo(Math.min(320, 1000 / 2), 0)
+    expect(second.width / second.height).toBeCloseTo(first.width / first.height, 2)
+  })
+})
+
+describe('a chart grows to fit its brackets', () => {
+  const crowd = Array.from({ length: 8 }, (_, i) => ({ name: `${i}`, values: [i * 10, i * 10 + 0.1, i * 10 - 0.1, i * 10 + 0.2] }))
+
+  it('grows downward when a test needs room, within the page, in one undo step', async () => {
+    const f = makeFigure()
+    const { ChartObject } = await import('./ChartObject')
+    f.setTool('chart')
+    pointer(f).click(500, 400)
+    const chart = f.canvas.getObjects().find((object) => object instanceof ChartObject)!
+    // A click fills the page's margin area, which leaves no room to grow: start from a smaller chart.
+    f.updateChart((c) => ({ ...c, groups: crowd, width: 320, height: 240 }))
+    const before = chart.getBoundingRect()
+    const grewFrom = f.updateChart((c) => ({ ...c, test: 'anova' }), true, undefined, true)
+    const after = chart.getBoundingRect()
+    expect(grewFrom).toBeCloseTo(before.height, 0)
+    expect(after.height).toBeGreaterThan(before.height)
+    // Downward first; only when the page's bottom stops it does it move up, and never off the page.
+    expect(after.top).toBeGreaterThanOrEqual(-0.5)
+    expect(after.top + after.height).toBeLessThanOrEqual(800 + 0.5)
+    if (after.top < before.top - 0.5) expect(after.top + after.height).toBeCloseTo(800, 0)
+    f.undo()
+    // Undo puts the page back from its saved state, which loads in the background.
+    await vi.waitFor(() => expect(f.canvas.getObjects().find((object): object is InstanceType<typeof ChartObject> => object instanceof ChartObject)?.chart.test).toBe('none'))
+    const undone = f.canvas.getObjects().find((object) => object instanceof ChartObject)!
+    expect(undone.chart.test).toBe('none')
+    expect(undone.getBoundingRect().height).toBeCloseTo(before.height, 0)
+  })
+
+  it('shrinks back to its own height and spot when the brackets need less room, unless resized by hand since', async () => {
+    const f = makeFigure()
+    const { ChartObject } = await import('./ChartObject')
+    f.setTool('chart')
+    pointer(f).click(500, 400)
+    const chart = f.canvas.getObjects().find((object) => object instanceof ChartObject)!
+    // A click fills the page's margin area, which leaves no room to grow: start from a smaller chart.
+    f.updateChart((c) => ({ ...c, groups: crowd, width: 320, height: 240 }))
+    const own = chart.getBoundingRect()
+    f.updateChart((c) => ({ ...c, test: 'anova' }), true, undefined, true)
+    expect(chart.getBoundingRect().height).toBeGreaterThan(own.height)
+    f.updateChart((c) => ({ ...c, test: 'none' }), true, undefined, true)
+    expect(chart.getBoundingRect().height).toBeCloseTo(own.height, 0)
+    expect(chart.getBoundingRect().top).toBeCloseTo(own.top, 0)
+    expect(chart.chart.grown).toBeUndefined()
+    // Grown again, then made a bit taller by hand: that size is now the chart's own, so it stays.
+    f.updateChart((c) => ({ ...c, test: 'anova' }), true, undefined, true)
+    chart.set({ scaleY: 1.05 })
+    chart.bakeScale()
+    const resized = chart.getBoundingRect().height
+    f.updateChart((c) => ({ ...c, test: 'none' }), true, undefined, true)
+    expect(chart.getBoundingRect().height).toBeCloseTo(resized, 0)
+  })
+
+  it('leaves the size alone without fit, or when the brackets already fit', async () => {
+    const f = makeFigure()
+    const { ChartObject } = await import('./ChartObject')
+    f.setTool('chart')
+    pointer(f).click(500, 400)
+    const chart = f.canvas.getObjects().find((object) => object instanceof ChartObject)!
+    f.updateChart((c) => ({ ...c, groups: crowd }))
+    const height = chart.getBoundingRect().height
+    expect(f.updateChart((c) => ({ ...c, test: 'anova' }))).toBeUndefined()
+    expect(chart.getBoundingRect().height).toBeCloseTo(height, 0)
+    f.updateChart((c) => ({ ...c, test: 'none', groups: crowd.slice(0, 3) }))
+    expect(f.updateChart((c) => ({ ...c, test: 'anova' }), true, undefined, true)).toBeUndefined()
+  })
 })
 
 describe('placing with the Place button', () => {
@@ -1188,5 +1353,61 @@ describe('figures saved with the removed CMYK preview', () => {
     const group = reopened.canvas.getObjects()[0] as Group
     expect(group.getObjects().map((part) => part.fill)).toEqual(['#ff0000', '#ff0000'])
     await reopened.dispose()
+  })
+})
+
+describe('picking table cells', () => {
+  /** A table placed in the middle of the page, selected, and a point inside its first cell. */
+  function addTable(f: FigureCanvas) {
+    f.addTable()
+    const table = f.canvas.getActiveObject() as TableObject
+    const box = table.getBoundingRect()
+    return { table, x: box.left + 8, y: box.top + 8 }
+  }
+
+  it('a click on the one picked cell lets go of it, back to the whole table (BIO-82)', () => {
+    const f = makeFigure()
+    const { table, x, y } = addTable(f)
+    const mouse = pointer(f)
+    mouse.click(x, y)
+    expect(table.cellRange).toEqual({ r0: 0, c0: 0, r1: 0, c1: 0 })
+    mouse.click(x, y)
+    expect(table.cellRange).toBeUndefined()
+    expect(f.canvas.getActiveObject()).toBe(table)
+  })
+
+  it('a double-click on a picked cell still starts typing in it', () => {
+    const f = makeFigure()
+    const { table, x, y } = addTable(f)
+    const mouse = pointer(f)
+    mouse.click(x, y)
+    mouse.doubleClick(x, y)
+    expect(table.editingCell).toEqual({ r: 0, c: 0 })
+  })
+})
+
+describe('telling the screen about changes while dragging (BIO-88)', () => {
+  it('sends at most one update per frame during a drag, and the final one when it is let go', async () => {
+    const f = makeFigure()
+    const box = addBox(f)
+    f.canvas.setActiveObject(box)
+    const states: CanvasState[] = []
+    f.subscribe((state) => states.push(state))
+    states.length = 0
+    const mouse = pointer(f)
+    mouse.press(150, 150)
+    for (let step = 1; step <= 10; step++) mouse.move(150 + step * 4, 150)
+    // Ten pointer moves within one frame: nothing yet, then one update showing the drag.
+    expect(states.filter((state) => state.transforming)).toHaveLength(0)
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    expect(states.filter((state) => state.transforming)).toHaveLength(1)
+    expect(states.at(-1)?.selection?.left).toBeCloseTo(box.left)
+    mouse.move(200, 150)
+    mouse.release(200, 150)
+    // Letting go tells the screen at once; the update that was waiting for the frame is dropped.
+    const afterRelease = states.length
+    expect(states.at(-1)?.transforming).toBe(false)
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    expect(states).toHaveLength(afterRelease)
   })
 })

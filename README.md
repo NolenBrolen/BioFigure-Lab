@@ -8,7 +8,7 @@ It runs in your browser and doesn't require an account. Use it at [biofigurelab.
 
 [Open the editor](https://biofigurelab.com/app/) · [Website](https://biofigurelab.com/) · [Icon licence](ICON-LICENSE.md)
 
-![The BioFigure Lab editor with a mouse vaccine study figure](.github/readme/editor.png)
+https://github.com/user-attachments/assets/90f73178-f8ca-477c-bce4-853f1185b324
 
 > [!IMPORTANT]
 > **The icon library isn't included in this repository.** It's a separate download with its own [licence](ICON-LICENSE.md). Follow step 3 below to download it. Without it, the editor still works, but the icon panel will be empty.
@@ -62,7 +62,6 @@ npm run build -w apps/editor
 ## Project layout
 
 - [`apps/editor`](apps/editor/): the figure editor
-- [`apps/api`](apps/api/): optional server part (Cloudflare Worker)
 - [`packages/ui`](packages/ui/): interface components
 - [`packages/export`](packages/export/): SVG, PNG and PDF exporters
 - `icons/`: the icon library, after you download it in step 3
@@ -94,20 +93,17 @@ You can use and adapt the icons in figures for papers, posters, talks, courses a
 - [x] Colour-blind-safe palettes
 - [x] Mobile UI
 - [x] Icon text labels
+- [x] Figure templates
+- [x] Example figures
+- [x] Ready-made blocks (panels, grids, legends, pathways)
+- [x] Heatmaps and XY charts
+- [x] Dark mode
 - [ ] Upload your own images
-- [ ] Figure templates
-- [ ] Example figures
 - [ ] More graph types
 - [ ] More languages
 
 </td>
 <td valign="top">
-
-**Accounts and working together**
-- [ ] Sign-in
-- [ ] Sync across devices
-- [ ] Share links
-- [ ] Share with people
 
 **Icon library**
 - [x] Recolourable icons

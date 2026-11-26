@@ -8,6 +8,7 @@ import type { ExportSettings } from '@biofigure-lab/export/export-figure'
 import { useToast } from '@biofigure-lab/ui/components/toast/Toast'
 import { useCallback } from 'react'
 
+import { emitAppEvent } from '../app-events'
 import { debugTargets, fakeProgress } from '../debug/debug-targets'
 import { loadExportFonts } from '../editor/export-fonts'
 import type { PageMm } from '../editor/page-size'
@@ -65,6 +66,7 @@ export function useExport() {
       }
       run().then(
         () => {
+          emitAppEvent({ name: 'export', value: format })
           toasts.update(id, { title: `Exported ${title}`, description: 'Saved to your downloads', timeout: 5000, data: {}, actionProps: undefined, onClose: undefined })
         },
         (error: unknown) => {

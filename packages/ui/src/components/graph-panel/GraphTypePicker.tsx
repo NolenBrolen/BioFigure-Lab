@@ -1,6 +1,7 @@
 /*
- * The graph type picker groups charts into three families: Individual values,
- * Box and violin, and Mean and error.
+ * The graph type picker groups charts into families: Individual values,
+ * Box and violin, Mean and error, and Other (the heatmap and the XY charts,
+ * which have dots at real numeric x values; one tab, the owner's call 2026-11-25).
  * The three most used (bar, line, dots) are tiles in a row with a More tile;
  * More opens a popup to the right with the family tabs, a search field that
  * looks through every family, and six graphs at a time. A graph picked from
@@ -65,6 +66,17 @@ export const GRAPH_FAMILIES: GraphFamily[] = [
       { id: 'bar-h', name: 'Bar, wide', hint: 'Bars lying down: good for long names' },
       { id: 'point-h', name: 'Point, wide', hint: 'Points lying down' },
       { id: 'slope', name: 'Slope', hint: 'Means joined by a line, with open markers' },
+      { id: 'bar-line', name: 'Bar + line', hint: 'Bars for one measure, a line for a second, with its own axis' },
+    ],
+  },
+  {
+    id: 'other',
+    name: 'Other',
+    tab: 'Other',
+    types: [
+      { id: 'heatmap', name: 'Heatmap', hint: 'A grid of coloured cells, such as expression or correlations' },
+      { id: 'xy', name: 'XY dots', hint: 'Dots at real x values: QQ plots, maps, correlations' },
+      { id: 'xy-line', name: 'XY line', hint: 'Dots joined in order of x: time courses, dose-response' },
     ],
   },
 ]
@@ -96,6 +108,7 @@ const Violin = ({ x, top, bottom, w }: { x: number; top: number; bottom: number;
 
 /** A small picture of one graph type, drawn with thin lines like the Shapes panel's pictures. */
 export function GraphTypePicture({ kind: given, className }: { kind: ChartKind; className?: string }) {
+  if (given === 'heatmap') return <HeatmapPicture className={className} />
   const kind = uprightKind(given)
   const picture = <UprightPicture kind={kind} />
   return (
@@ -103,6 +116,22 @@ export function GraphTypePicture({ kind: given, className }: { kind: ChartKind; 
       <path d="M3 2v25h31" />
       {/* Lying down: the upright picture turned a quarter turn, so the groups run down the side. */}
       {isHorizontal(given) ? <g transform="matrix(0 -0.8 -1 0 30 29.4)">{picture}</g> : picture}
+    </svg>
+  )
+}
+
+/** A heatmap: a 4 × 3 grid of cells in shades of the line colour (no axes), with a small colour bar beside it. */
+const HEAT_SHADES = [
+  [0.85, 0.35, 0.1, 0.55],
+  [0.35, 0.85, 0.45, 0.2],
+  [0.1, 0.45, 0.85, 0.65],
+]
+function HeatmapPicture({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 36 30" className={className} {...line}>
+      {HEAT_SHADES.map((row, r) => row.map((shade, c) => <rect key={`${r}-${c}`} x={3 + c * 6.5} y={4 + r * 7} width="6.5" height="7" fill="currentColor" fillOpacity={shade} strokeWidth="0.75" />))}
+      <rect x="31" y="4" width="3" height="21" strokeWidth="0.75" />
+      <rect x="31" y="4" width="3" height="10" fill="currentColor" fillOpacity={0.7} stroke="none" />
     </svg>
   )
 }
@@ -181,6 +210,24 @@ function UprightPicture({ kind }: { kind: UprightKind }) {
           <Whisk x={17} a={7} b={15} />
           <Whisk x={27} a={14} b={22} />
           {[[8, 22], [17, 11], [27, 18]].map(([x, y]) => <circle key={`${x}${y}`} cx={x} cy={y} r="2" fill="var(--color-panel, white)" />)}
+        </>
+      )}
+      {kind === 'bar-line' && (
+        <>
+          {/* The line's own axis on the right, the bars soft so the line reads over them. */}
+          <path d="M33 2v25" />
+          <rect x="6" y="9" width="6" height="18" fill="currentColor" fillOpacity={0.25} />
+          <rect x="15" y="15" width="6" height="12" fill="currentColor" fillOpacity={0.25} />
+          <rect x="24" y="19" width="6" height="8" fill="currentColor" fillOpacity={0.25} />
+          <path d="M9 18 18 10l9-4" />
+          <Dots at={[[9, 18], [18, 10], [27, 6]]} />
+        </>
+      )}
+      {kind === 'xy' &&<Dots at={[[7, 23], [10, 19], [13, 21], [15, 15], [19, 16], [21, 11], [25, 12], [28, 7], [31, 8]]} />}
+      {kind === 'xy-line' && (
+        <>
+          <path d="M6 24 10 20 15 14 22 10 32 8" />
+          <Dots at={[[6, 24], [10, 20], [15, 14], [22, 10], [32, 8]]} />
         </>
       )}
       {kind === 'line' && (
@@ -270,6 +317,28 @@ function AllGraphs({ value, onPick }: { value?: ChartKind; onPick: (kind: ChartK
         ))}
         {shown.length === 0 && <p className="py-6 text-center text-xs text-muted-foreground">No graph matches that search.</p>}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Every graph type at once, family by family under its name, as named
+ * tiles: for an empty chart space waiting for a graph (BIO-86), so it's clear
+ * a graph type is to be picked (owner's feedback, 2026-11-25).
+ */
+export function GraphList({ onPick, className }: { onPick: (kind: ChartKind) => void; className?: string }) {
+  return (
+    <div className={cn('flex flex-col gap-3', className)}>
+      {GRAPH_FAMILIES.map((f) => (
+        <section key={f.id} aria-label={f.name}>
+          <h3 className="section-label flex h-7 items-center">{f.name}</h3>
+          <div role="radiogroup" aria-label={f.name} className="grid grid-cols-3 gap-2">
+            {f.types.map((type) => (
+              <NamedTile key={type.id} type={type} on={false} onPick={onPick} />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }

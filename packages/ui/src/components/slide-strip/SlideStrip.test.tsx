@@ -20,6 +20,11 @@ describe('SlideStrip', () => {
     expect(onSelect).toHaveBeenCalledWith('c')
   })
 
+  it('shows a slide’s badge and says it in the slide’s name', () => {
+    strip({ slides: [{ id: 'a' }, { id: 'b', badge: 'This computer' }] })
+    expect(screen.getByRole('button', { name: 'Slide 2, This computer' })).toHaveTextContent('This computer')
+  })
+
   it('adds a slide with the + button', async () => {
     const { user, onAdd } = strip()
     await user.click(screen.getByRole('button', { name: 'Add slide' }))

@@ -40,12 +40,13 @@ export function PropRows({ children, className }: { children: ReactNode; classNa
  * below don't move). `top`: the label lines up with the top of taller controls.
  * `hideLabel`: the label only for screen readers, when the controls say it (like the Y axis / X axis tabs).
  * `wide`: the label on a line of its own, with the controls under it across the panel's whole width (the icon's Style tiles).
+ * `rowId`: the name the phone's property bar knows the row by, when the label shown changes with the data (an XY chart's series).
  */
-export function PropRow({ label, off = false, top = false, hideLabel = false, wide = false, children }: { label: string; off?: boolean; top?: boolean; hideLabel?: boolean; wide?: boolean; children: ReactNode }) {
+export function PropRow({ label, rowId = label, off = false, top = false, hideLabel = false, wide = false, children }: { label: string; rowId?: string; off?: boolean; top?: boolean; hideLabel?: boolean; wide?: boolean; children: ReactNode }) {
   return (
     <>
-      <span data-prop-label={label} className={cn('text-xs text-muted-foreground', off && 'opacity-50', top && 'self-start pt-1', wide && 'col-span-2', hideLabel && 'sr-only')}>{label}</span>
-      <div data-prop-row={label} inert={off} aria-disabled={off || undefined} className={cn('flex min-w-0 items-center gap-1.5', wide && 'col-span-2', off && 'opacity-50')}>
+      <span data-prop-label={rowId} data-wide-label={wide || undefined} className={cn('text-xs text-muted-foreground', off && 'opacity-50', top && 'self-start pt-1', wide && 'col-span-2', hideLabel && 'sr-only')}>{label}</span>
+      <div data-prop-row={rowId} inert={off} aria-disabled={off || undefined} className={cn('flex min-w-0 items-center gap-1.5', wide && 'col-span-2', off && 'opacity-50')}>
         {children}
       </div>
     </>
@@ -99,8 +100,10 @@ export const popupAlignOffset = ({ anchor }: { anchor: { height: number } }) => 
  * three per row with their names (92 px square, 10 px apart). The picked
  * option takes the row's last place when it isn't one of the common ones.
  * `more={false}`: every option fits in the row, so there is no ⋯ button.
+ * `columns`: how many buttons share the row (6 by default; fewer for bigger
+ * pictures, like the frame styles' 4).
  */
-export function OptionPicker<T extends string>({ title, options, rowIds, value, onPick, more = true }: { title: string; options: readonly PickerOption<T>[]; rowIds: readonly T[]; value?: T; onPick: (id: T) => void; more?: boolean }) {
+export function OptionPicker<T extends string>({ title, options, rowIds, value, onPick, more = true, columns = 6 }: { title: string; options: readonly PickerOption<T>[]; rowIds: readonly T[]; value?: T; onPick: (id: T) => void; more?: boolean; columns?: number }) {
   // The phone's sheet with this one setting open has room for every option, with its name.
   const expanded = useExpandedControls()
   if (expanded) {
@@ -117,7 +120,7 @@ export function OptionPicker<T extends string>({ title, options, rowIds, value, 
   const ids = !more || value === undefined || rowIds.includes(value) ? rowIds : [...rowIds.slice(0, -1), value]
   const row = ids.flatMap((id) => options.find((option) => option.id === id) ?? [])
   return (
-    <div className="grid flex-1 grid-cols-6 gap-1">
+    <div className="grid flex-1 gap-1" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
       {row.map((option) => (
         <PickerButton key={option.id} option={option} on={option.id === value} onPick={onPick} />
       ))}

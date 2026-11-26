@@ -117,6 +117,12 @@ const JOINS: Record<string, string> = {
   'Welch’s': 'Statistics',
   'Effect size': 'Statistics',
   'Show ns': 'Statistics',
+  // A panel's Letter row and the slide's letter settings (BIO-83) are one Letters item, like a grid's Letters toggle.
+  Letter: 'Letters',
+  'Letter style': 'Letters',
+  'Letter weight': 'Letters',
+  'Letter size': 'Letters',
+  Numbering: 'Letters',
 }
 
 /**
@@ -147,7 +153,43 @@ const CHART_JOINS: Record<string, string> = {
   // The Axes sheet's Y axis / X axis tabs and each axis's title.
   Axis: 'Axes',
   Title: 'Axes',
+  // The plot's frame, grid, tick marks and scale (BIO-68).
+  Frame: 'Axes',
+  Grid: 'Axes',
+  Ticks: 'Axes',
+  Scale: 'Axes',
+  'Reference lines': 'Axes',
 }
+
+/** A heatmap's colour settings under Colours, its row and column titles under Axes. Its Scale is the colour scale, not the axis scale. */
+const HEATMAP_JOINS: Record<string, string> = {
+  Values: 'Colours',
+  Scale: 'Colours',
+  'Colour range': 'Colours',
+  Centre: 'Colours',
+  Symmetric: 'Colours',
+  'Cell values': 'Colours',
+  Decimals: 'Colours',
+  'Colour bar': 'Colours',
+  'Bar title': 'Colours',
+  'Row title': 'Axes',
+  'Column title': 'Axes',
+  Names: 'Axes',
+}
+
+/** An XY chart's dots and colour-by settings under Colours, its axes' scales, range and y = x line under Axes. Its Scale is the colour scale. */
+const XY_JOINS: Record<string, string> = {
+  'Colour by': 'Colours',
+  Scale: 'Colours',
+  'Colour range': 'Colours',
+  Centre: 'Colours',
+  'Y scale': 'Axes',
+  'X scale': 'Axes',
+  'y = x': 'Axes',
+  'X range': 'Axes',
+}
+/** Each series' dot row is named after the series (see XyProperties). */
+const XY_DOTS = 'Dots: '
 
 /**
  * A table on a phone (its panel has a "Look" row): look, layout, lines and
@@ -197,11 +239,13 @@ export function settingGroups(names: readonly string[]): SettingGroup[] {
   const groups: SettingGroup[] = []
   const text = names.includes('Font size')
   const chart = names.includes('Kind')
+  const heatmap = chart && names.includes('Values')
+  const xy = chart && names.includes('Colour by')
   const table = names.includes('Look')
   const shape = names.includes(TYPE_TEXT)
   for (const name of names) {
     const short = shortName(name)
-    const id = (shape ? (SHAPE_TEXT_JOINS[short] ?? (short === TYPE_TEXT ? TYPE_TEXT : undefined)) : undefined) ?? (text ? TEXT_JOINS[short] : undefined) ?? (chart ? CHART_JOINS[short] : undefined) ?? (table ? TABLE_JOINS[short] : undefined) ?? JOINS[short] ?? (short in OWN_ITEM || isColour(short) ? short : PROPERTIES)
+    const id = (shape ? (SHAPE_TEXT_JOINS[short] ?? (short === TYPE_TEXT ? TYPE_TEXT : undefined)) : undefined) ?? (text ? TEXT_JOINS[short] : undefined) ?? (heatmap ? HEATMAP_JOINS[short] : undefined) ?? (xy ? (short.startsWith(XY_DOTS) ? 'Colours' : XY_JOINS[short]) : undefined) ?? (chart ? CHART_JOINS[short] : undefined) ?? (table ? TABLE_JOINS[short] : undefined) ?? JOINS[short] ?? (short in OWN_ITEM || isColour(short) ? short : PROPERTIES)
     const group = groups.find((each) => each.id === id)
     if (group) group.rows.push(name)
     else {

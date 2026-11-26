@@ -4,8 +4,9 @@
  * row per action: icon, name and keyboard shortcut. Lines split the actions
  * into groups, and a group can have a small heading (Arrange, Align). A group
  * can also show as a row of icons only, for sets like the six align buttons.
- * Actions that remove things are red. Arrow keys move through
- * the rows, Enter runs one, Escape closes the menu.
+ * Actions that remove things are red. A row can hold a submenu that opens
+ * beside it on hover (or the right arrow key), like Arrange. Arrow keys move
+ * through the rows, Enter runs one, Escape closes the menu.
  *
  * `DropdownMenu` shows the same card from a button instead (a "More" button),
  * below it.
@@ -15,8 +16,8 @@
  */
 import { ContextMenu as MenuPrimitive } from '@base-ui/react/context-menu'
 import { Menu as DropdownPrimitive } from '@base-ui/react/menu'
-import type { LucideIcon } from 'lucide-react'
-import { Fragment, type ReactElement } from 'react'
+import { ChevronRight, type LucideIcon } from 'lucide-react'
+import { Fragment, type ReactElement, type ReactNode } from 'react'
 
 import { cn } from '../../lib/cn'
 import { formatShortcut } from '../../lib/shortcut'
@@ -32,6 +33,10 @@ export type MenuAction = {
   /** For a style that is on or off, like Strikethrough: shown pressed while on. Icon items only. */
   checked?: boolean
   onClick?: () => void
+  /** Makes the row a link (Privacy policy). It opens in a new tab, so the figure you're working on stays put. */
+  href?: string
+  /** Makes the row open a smaller menu beside it on hover (Arrange: front, forward, backward, back). */
+  submenu?: MenuAction[]
 }
 
 export type MenuSection = {
@@ -74,31 +79,45 @@ export type DropdownMenuProps = {
   /** Which side of the button the menu opens on. */
   side?: 'top' | 'bottom' | 'left' | 'right'
   align?: 'start' | 'center' | 'end'
+  /** Something above the first group that isn't an action, like who is signed in. A line follows it. */
+  header?: ReactNode
+  /** Something below the last group that isn't an action, like small links. A line comes before it. Use Menu link items in it so the arrow keys reach them. */
+  footer?: ReactNode
+  /** Open from the start, for a menu mounted at the moment its button is pressed (see the icon library's tiles). */
+  defaultOpen?: boolean
 }
 
-export function DropdownMenu({ sections, trigger, side = 'bottom', align = 'start' }: DropdownMenuProps) {
+export function DropdownMenu({ sections, trigger, side = 'bottom', align = 'start', header, footer, defaultOpen }: DropdownMenuProps) {
   return (
-    <DropdownPrimitive.Root>
+    <DropdownPrimitive.Root defaultOpen={defaultOpen}>
       <DropdownPrimitive.Trigger render={trigger} />
       <DropdownPrimitive.Portal>
         <DropdownPrimitive.Positioner side={side} align={align} sideOffset={6} className="z-50 outline-none">
-          <MenuPopup sections={sections} />
+          <MenuPopup sections={sections} header={header} footer={footer} />
         </DropdownPrimitive.Positioner>
       </DropdownPrimitive.Portal>
     </DropdownPrimitive.Root>
   )
 }
 
+const POPUP_CLASS = cn(
+  'min-w-48 rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md outline-none select-none',
+  'origin-(--transform-origin) transition-[opacity,scale] duration-(--duration-fast) ease-enter',
+  'data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0',
+)
+
+const ITEM_CLASS = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none data-disabled:opacity-50 data-highlighted:bg-accent'
+
 /** The card itself, the same for both menus. */
-function MenuPopup({ sections }: { sections: MenuSection[] }) {
+function MenuPopup({ sections, header, footer }: { sections: MenuSection[]; header?: ReactNode; footer?: ReactNode }) {
   return (
-    <MenuPrimitive.Popup
-      className={cn(
-        'min-w-48 rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md outline-none select-none',
-        'origin-(--transform-origin) transition-[opacity,scale] duration-(--duration-fast) ease-enter',
-        'data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0',
+    <MenuPrimitive.Popup className={POPUP_CLASS}>
+      {header && (
+        <>
+          <div role="presentation">{header}</div>
+          <MenuPrimitive.Separator className="my-1 h-px bg-border" />
+        </>
       )}
-    >
       {sections.map((section, index) => (
         <Fragment key={section.label}>
           {index > 0 && <MenuPrimitive.Separator className="my-1 h-px bg-border" />}
@@ -122,26 +141,61 @@ function MenuPopup({ sections }: { sections: MenuSection[] }) {
           </MenuPrimitive.Group>
         </Fragment>
       ))}
+      {footer && (
+        <>
+          <MenuPrimitive.Separator className="my-1 h-px bg-border" />
+          <div role="presentation">{footer}</div>
+        </>
+      )}
     </MenuPrimitive.Popup>
   )
 }
 
 function MenuItem({ action }: { action: MenuAction }) {
+  if (action.submenu) return <SubmenuItem action={action} submenu={action.submenu} />
   const Icon = action.icon
-  return (
-    <MenuPrimitive.Item
-      disabled={action.disabled}
-      onClick={action.onClick}
-      className={cn(
-        'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none',
-        'data-disabled:opacity-50 data-highlighted:bg-accent',
-        action.danger && 'text-destructive-text data-highlighted:bg-destructive/10',
-      )}
-    >
+  const className = cn(ITEM_CLASS, action.danger && 'text-destructive-text data-highlighted:bg-destructive/10')
+  const content = (
+    <>
       {Icon && <Icon className={cn('size-4', !action.danger && 'text-muted-foreground')} strokeWidth={1.75} aria-hidden="true" />}
       <span className="flex-1">{action.label}</span>
       {action.shortcut && <kbd className="ml-4 font-sans text-xs text-muted-foreground">{formatShortcut(action.shortcut)}</kbd>}
+    </>
+  )
+  if (action.href) {
+    return (
+      <MenuPrimitive.LinkItem href={action.href} target="_blank" rel="noopener noreferrer" onClick={action.onClick} className={className}>
+        {content}
+      </MenuPrimitive.LinkItem>
+    )
+  }
+  return (
+    <MenuPrimitive.Item disabled={action.disabled} onClick={action.onClick} className={className}>
+      {content}
     </MenuPrimitive.Item>
+  )
+}
+
+/** A row that opens its own small menu beside it, on hover or the right arrow key. */
+function SubmenuItem({ action, submenu }: { action: MenuAction; submenu: MenuAction[] }) {
+  const Icon = action.icon
+  return (
+    <MenuPrimitive.SubmenuRoot>
+      <MenuPrimitive.SubmenuTrigger disabled={action.disabled} className={cn(ITEM_CLASS, 'data-popup-open:bg-accent')}>
+        {Icon && <Icon className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />}
+        <span className="flex-1">{action.label}</span>
+        <ChevronRight className="ml-4 size-3.5 text-muted-foreground" aria-hidden="true" />
+      </MenuPrimitive.SubmenuTrigger>
+      <MenuPrimitive.Portal>
+        <MenuPrimitive.Positioner sideOffset={-4} alignOffset={-5} className="z-50 outline-none">
+          <MenuPrimitive.Popup className={POPUP_CLASS}>
+            {submenu.map((item) => (
+              <MenuItem key={item.label} action={item} />
+            ))}
+          </MenuPrimitive.Popup>
+        </MenuPrimitive.Positioner>
+      </MenuPrimitive.Portal>
+    </MenuPrimitive.SubmenuRoot>
   )
 }
 

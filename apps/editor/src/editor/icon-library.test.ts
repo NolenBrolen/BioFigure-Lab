@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { allLibraryIcons, browseIcons, inStyle, isDarkLineArt, keepsColour, letterVersions, libraryIcons, loadIconSvg, signVersions, styleVersion, mainColour, needsLightBacking, modeColour, placementSize, recolourPart, tintColour, type LibraryIcon } from './icon-library'
+import { allLibraryIcons, browseIcons, cachedIconSvg, inStyle, isDarkLineArt, keepsColour, letterVersions, libraryIcons, loadIconSvg, signVersions, styleVersion, mainColour, needsLightBacking, modeColour, placementSize, recolourPart, tintColour, type LibraryIcon } from './icon-library'
 
 const icon = (name: string, category: string, keywords: string[] = []): LibraryIcon => ({
   id: name,
@@ -13,6 +15,13 @@ const icon = (name: string, category: string, keywords: string[] = []): LibraryI
 // installed library's own files run only when it is there.
 const installed = libraryIcons.length > 0
 
+// Tests that look at many SVG files read them straight from disk. loadIconSvg
+// would send each one through Vite's module pipeline, which all test files
+// share, so a couple of thousand of them can run past the time limit while the
+// whole check is running.
+const iconsFolder = join(import.meta.dirname, '../../../../icons')
+const svgFile = (id: string) => readFileSync(join(iconsFolder, `${id}.svg`), 'utf8')
+
 const icons = [
   icon('Macrophage', 'cells', ['immune cell', 'phagocyte']),
   icon('Red blood cell', 'cells', ['erythrocyte']),
@@ -20,15 +29,18 @@ const icons = [
 ]
 
 describe('icon library', () => {
-  // Reads every SVG file (about a thousand), so it gets more time than usual.
+  // Reads every SVG file (over two thousand), so it gets more time than usual.
   it.runIf(installed)('loads each icon once with its metadata', { timeout: 30_000 }, async () => {
     expect(libraryIcons.length).toBeGreaterThan(0)
     expect(new Set(allLibraryIcons.map(({ id }) => id)).size).toBe(allLibraryIcons.length)
-    const svgs = await Promise.all(allLibraryIcons.map(({ id }) => loadIconSvg(id)))
-    allLibraryIcons.forEach(({ id, name }, i) => {
+    for (const { id, name } of allLibraryIcons) {
       expect(name, id).not.toBe('')
-      expect(svgs[i], id).toContain('viewBox="0 0 128 128"')
-    })
+      expect(svgFile(id), id).toContain('viewBox="0 0 128 128"')
+    }
+    // The app's own loader gives that same file, and keeps it.
+    const first = allLibraryIcons[0]?.id ?? ''
+    expect(await loadIconSvg(first)).toBe(svgFile(first))
+    expect(cachedIconSvg(first)).toBe(svgFile(first))
   })
 
   it('finds icons by name, keyword or category, grouped by category', () => {
@@ -91,11 +103,10 @@ describe('dark mode previews', () => {
     expect(isDarkLineArt('<svg><circle fill="#C9C3E6"/><circle fill="#6c528f"/></svg>')).toBe(false)
   })
 
-  it.runIf(installed)('leaves every multi-level library icon in its own colours', async () => {
+  it.runIf(installed)('leaves every multi-level library icon in its own colours', () => {
     const levelled = libraryIcons.filter((icon) => /-(glyph|simple|detailed|structural)-/.test(icon.id))
     expect(levelled.length).toBeGreaterThan(0)
-    const svgs = await Promise.all(levelled.map((icon) => loadIconSvg(icon.id)))
-    expect(levelled.filter((_, i) => isDarkLineArt(svgs[i] ?? '')).map((icon) => icon.id)).toEqual([])
+    expect(levelled.filter((icon) => isDarkLineArt(svgFile(icon.id))).map((icon) => icon.id)).toEqual([])
   })
 
   it('pairs each molecule with its version with letters, and nothing else', () => {
@@ -132,12 +143,11 @@ describe('dark mode previews', () => {
     expect(signVersions('small-molecules/caffeine-skeletal')).toBeUndefined()
   })
 
-  it.runIf(installed)('puts chemistry structures on a white backing instead of flipping them', async () => {
+  it.runIf(installed)('puts chemistry structures on a white backing instead of flipping them', () => {
     const molecules = libraryIcons.filter((icon) => icon.category === 'small molecules')
     expect(molecules.length).toBeGreaterThan(0)
     expect(molecules.every(needsLightBacking)).toBe(true)
-    const svgs = await Promise.all(molecules.map((icon) => loadIconSvg(icon.id)))
-    expect(molecules.filter((_, i) => isDarkLineArt(svgs[i] ?? '')).map((icon) => icon.id)).toEqual([])
+    expect(molecules.filter((icon) => isDarkLineArt(svgFile(icon.id))).map((icon) => icon.id)).toEqual([])
     expect(libraryIcons.filter((icon) => icon.category !== 'small molecules').some(needsLightBacking)).toBe(false)
   })
 })

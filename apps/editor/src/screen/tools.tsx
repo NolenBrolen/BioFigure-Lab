@@ -36,20 +36,34 @@ export function toolAfterSelectionEnds(tool: DrawTool, panel: string): DrawTool 
 }
 
 /** The rail tool whose panel shows each kind of selected object's properties. Groups and several objects have none. */
-export const panelForSelection: Partial<Record<SelectionInfo['kind'], string>> = { shape: 'shapes', line: 'arrows', text: 'text', icon: 'icons', chart: 'graph', table: 'table' }
+export const panelForSelection: Partial<Record<SelectionInfo['kind'], string>> = { shape: 'shapes', line: 'arrows', text: 'text', icon: 'icons', chart: 'graph', table: 'table', panel: 'blocks', space: 'icons', sequence: 'blocks', timeline: 'blocks', callout: 'blocks', 'chart-space': 'graph', plate: 'blocks', legend: 'blocks' }
 
 /** Each panel's name, as the right panel mentions it. */
-export const panelNames: Record<string, string> = { icons: 'Icons', arrows: 'Arrows', shapes: 'Shapes', text: 'Text', graph: 'Graph', table: 'Table' }
+export const panelNames: Record<string, string> = { icons: 'Icons', arrows: 'Arrows', shapes: 'Shapes', blocks: 'Blocks', text: 'Text', graph: 'Graph', table: 'Table' }
 
-export function editorTools({ iconsPanel, arrowsPanel, shapesPanel, textPanel, graphPanel, tablePanel }: { iconsPanel: ReactNode; arrowsPanel: ReactNode; shapesPanel: ReactNode; textPanel: ReactNode; graphPanel: ReactNode; tablePanel: ReactNode }): Tool[] {
+export function editorTools({ iconsPanel, arrowsPanel, shapesPanel, blocksPanel, textPanel, graphPanel, tablePanel }: { iconsPanel: ReactNode; arrowsPanel: ReactNode; shapesPanel: ReactNode; blocksPanel: ReactNode; textPanel: ReactNode; graphPanel: ReactNode; tablePanel: ReactNode }): Tool[] {
   return [
-    { id: 'icons', label: 'Icons', icon: Shell, panel: iconsPanel },
+    // Kept on the page while another tool is open: building the library again took most of a second (BIO-90).
+    { id: 'icons', label: 'Icons', icon: Shell, panel: iconsPanel, keepMounted: true },
     { id: 'arrows', label: 'Arrows and lines', icon: ArrowsAndLinesIcon, panel: arrowsPanel, shortcut: 'A, L' },
     { id: 'shapes', label: 'Shapes', icon: ShapesToolIcon, panel: shapesPanel, shortcut: 'R, O' },
+    { id: 'blocks', label: 'Blocks', icon: BlocksToolIcon, panel: blocksPanel },
     { id: 'text', label: 'Text', icon: Type, panel: textPanel, shortcut: 'T' },
     { id: 'graph', label: 'Graph', icon: ChartColumn, panel: graphPanel },
     { id: 'table', label: 'Table', icon: Table, panel: tablePanel },
   ]
+}
+
+/** The Blocks tool's rail icon: a panel with its header strip holding two blocks, drawn like a Lucide icon. */
+function BlocksToolIcon({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18" />
+      <rect x="6.5" y="12.5" width="4" height="4" rx="0.5" />
+      <rect x="13.5" y="12.5" width="4" height="4" rx="0.5" />
+    </svg>
+  )
 }
 
 /** The Arrows tool's rail icon: a diagonal arrow beside a plain line, drawn like a Lucide icon. */

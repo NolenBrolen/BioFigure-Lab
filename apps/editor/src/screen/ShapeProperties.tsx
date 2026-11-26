@@ -28,6 +28,7 @@ import { useState, type ReactNode } from 'react'
 
 import { toHex } from '../editor/colour'
 import { TYPE_TEXT } from './mobile-props'
+import { usePanelTab } from './panel-tab'
 import type { SelectionInfo } from '../editor/FigureCanvas'
 import type { TextFit } from '../editor/shape-text'
 import { clickSize, type ShapeStyle } from '../editor/shapes'
@@ -68,7 +69,7 @@ const TEXT_FITS = [
   { value: 'wrap', icon: WrapText, label: 'Wrap' },
 ] as const
 
-type Preset = { name: string; fill: string; stroke: string; text: string }
+export type Preset = { name: string; fill: string; stroke: string; text: string }
 
 /**
  * Ready-made looks, each a fill, an outline and a text colour that go
@@ -87,7 +88,7 @@ type Preset = { name: string; fill: string; stroke: string; text: string }
  *   Outline - white fill, the colour as outline and text
  * then the neutral ones. Five light ones show in the row (ROW_NAMES).
  */
-const PRESET_GROUPS: readonly { name: string; presets: readonly Preset[] }[] = [
+export const PRESET_GROUPS: readonly { name: string; presets: readonly Preset[] }[] = [
   {
     name: 'Light',
     presets: [
@@ -186,10 +187,23 @@ const PRESET_GROUPS: readonly { name: string; presets: readonly Preset[] }[] = [
 ]
 /** The five light presets shown in the row, in this order (the popup has them all, sorted by colour). */
 const ROW_NAMES = ['Blue', 'Orange', 'Purple', 'Yellow', 'Sky']
-const ROW_PRESETS: readonly Preset[] = ROW_NAMES.flatMap((name) => PRESET_GROUPS[0]?.presets.find((preset) => preset.name === name) ?? [])
+const ROW_PRESETS: readonly Preset[] = presetsNamed(ROW_NAMES)
 
-/** One preset: its fill and outline, with "Aa" in its text colour. */
-function PresetSwatch({ preset, on, open, onPick }: { preset: Preset; on: boolean; open: boolean; onPick: (preset: Preset) => void }) {
+/** The presets with these names, in this order. */
+function presetsNamed(names: readonly string[]): Preset[] {
+  return names.flatMap((name) => PRESET_GROUPS.flatMap((group) => group.presets).find((preset) => preset.name === name) ?? [])
+}
+
+/** How a preset square is drawn: its fill (none when empty), outline and the colour of its "Aa". */
+export type SwatchLook = { fill: string; stroke: string; text: string }
+
+/** One shape preset's square (also the quick widgets'). `open`: only the outline (for lines). */
+export function PresetSwatch({ preset, on, open, onPick }: { preset: Preset; on: boolean; open: boolean; onPick: (preset: Preset) => void }) {
+  return <LookSwatch preset={preset} look={preset} on={on} blank={open} onPick={onPick} />
+}
+
+/** One preset of any kind (shapes, frames, panels): its fill and outline, with "Aa" in its text colour. `blank`: only the outline (for lines). */
+export function LookSwatch<P extends { name: string }>({ preset, look, on, blank, onPick }: { preset: P; look: SwatchLook; on: boolean; blank: boolean; onPick: (preset: P) => void }) {
   return (
     <button
       type="button"
@@ -198,26 +212,54 @@ function PresetSwatch({ preset, on, open, onPick }: { preset: Preset; on: boolea
       aria-pressed={on}
       onClick={() => onPick(preset)}
       className={`grid aspect-square place-items-center rounded-md border-2 text-xs leading-none font-semibold tracking-tight outline-offset-2 transition-transform duration-(--duration-instant) hover:scale-105 focus-visible:outline-2 focus-visible:outline-ring ${on ? 'outline-2 outline-foreground' : ''}`}
-      style={{ background: open || !preset.fill ? 'transparent' : preset.fill, borderColor: preset.stroke, color: preset.text }}
+      style={{ background: blank || !look.fill ? 'transparent' : look.fill, borderColor: look.stroke, color: look.text }}
     >
-      {open ? null : 'Aa'}
+      {blank ? null : 'Aa'}
     </button>
   )
 }
 
-/** The preset row: the first few presets and a button that opens them all to its right. */
-function Presets({ fill, stroke, open, onPick }: { fill?: string; stroke?: string; open: boolean; onPick: (preset: Preset) => void }) {
-  // Lines take no fill or text, so only their outline has to match.
-  const isOn = (preset: Preset) => stroke?.toLowerCase() === preset.stroke && (open || (fill?.toLowerCase() ?? '') === preset.fill)
+export type PresetPickerProps<P extends { name: string }> = {
+  /** Every preset, in named groups, for the ⋯ popup (and a phone's sheet). */
+  groups: readonly { name: string; presets: readonly P[] }[]
+  /** The presets in the row. */
+  row: readonly P[]
+  /** How each preset's square looks. */
+  look: (preset: P) => SwatchLook
+  /** Whether a preset is the one in use (it gets a ring). */
+  isOn: (preset: P) => boolean
+  onPick: (preset: P) => void
+  /** Only outlines, no fill or "Aa" (lines). */
+  blank?: boolean
+  /** Columns in the row, the ⋯ button included. */
+  columns?: number
+  /** Fine-tuning controls shown at the top of the popup, above all the presets. */
+  custom?: ReactNode
+  /** The heading over `custom`. */
+  customLabel?: string
+}
+
+/**
+ * The preset row: the first few presets and a button that opens them all to
+ * its right. Any kind of preset: shapes and icon frames use a fill, outline
+ * and text colour each (`Presets` below), panels one colour (PanelProperties).
+ */
+export function PresetPicker<P extends { name: string }>({ groups, row, look, isOn, onPick, blank = false, columns = 6, custom, customLabel = 'Custom' }: PresetPickerProps<P>) {
   const expanded = useExpandedControls()
-  const groups = (
+  const all = (
     <div className="flex flex-col gap-2">
-      {PRESET_GROUPS.map((group) => (
+      {custom && (
+        <div role="group" aria-label={customLabel} className="mb-1 flex flex-col gap-2 border-b border-border pb-3">
+          <span className="text-xs text-muted-foreground">{customLabel}</span>
+          {custom}
+        </div>
+      )}
+      {groups.map((group) => (
         <div key={group.name} role="group" aria-label={group.name} className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground">{group.name}</span>
           <div className="grid grid-cols-8 gap-1">
             {group.presets.map((preset) => (
-              <PresetSwatch key={preset.name} preset={preset} on={isOn(preset)} open={open} onPick={onPick} />
+              <LookSwatch key={preset.name} preset={preset} look={look(preset)} on={isOn(preset)} blank={blank} onPick={onPick} />
             ))}
           </div>
         </div>
@@ -225,11 +267,11 @@ function Presets({ fill, stroke, open, onPick }: { fill?: string; stroke?: strin
     </div>
   )
   // The phone's sheet with only presets open shows them all, without the short row and ⋯ button.
-  if (expanded) return <div className="min-w-0 flex-1">{groups}</div>
+  if (expanded) return <div className="min-w-0 flex-1">{all}</div>
   return (
-    <div className="grid flex-1 grid-cols-6 gap-1">
-      {ROW_PRESETS.map((preset) => (
-        <PresetSwatch key={preset.name} preset={preset} on={isOn(preset)} open={open} onPick={onPick} />
+    <div className="grid flex-1 gap-1" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+      {row.map((preset) => (
+        <LookSwatch key={preset.name} preset={preset} look={look(preset)} on={isOn(preset)} blank={blank} onPick={onPick} />
       ))}
       <Popover
         title="Presets"
@@ -249,9 +291,40 @@ function Presets({ fill, stroke, open, onPick }: { fill?: string; stroke?: strin
           </button>
         }
       >
-        {groups}
+        {all}
       </Popover>
     </div>
+  )
+}
+
+type PresetsProps = {
+  fill?: string
+  stroke?: string
+  open: boolean
+  onPick: (preset: Preset) => void
+  /** The presets in the row, by name (defaults to five light ones). */
+  rowNames?: readonly string[]
+  /** Columns in the row, the ⋯ button included. */
+  columns?: number
+  /** Fine-tuning controls shown at the top of the popup, above all the presets. */
+  custom?: ReactNode
+}
+
+/** The shape and icon-frame presets: a fill, outline and text colour each. */
+export function Presets({ fill, stroke, open, onPick, rowNames, columns = 6, custom }: PresetsProps) {
+  // Lines take no fill or text, so only their outline has to match.
+  const isOn = (preset: Preset) => stroke?.toLowerCase() === preset.stroke && (open || (fill?.toLowerCase() ?? '') === preset.fill)
+  return (
+    <PresetPicker
+      groups={PRESET_GROUPS}
+      row={rowNames ? presetsNamed(rowNames) : ROW_PRESETS}
+      look={(preset) => preset}
+      isOn={isOn}
+      onPick={onPick}
+      blank={open}
+      columns={columns}
+      custom={custom}
+    />
   )
 }
 
@@ -266,7 +339,7 @@ const CLOSED_SHAPES: PickerOption<ShapeKind>[] = SHAPES.filter((each) => each.in
 const ROW_SHAPES: readonly ShapeKind[] = ['rectangle', 'rounded', 'ellipse', 'triangle', 'diamond']
 
 /** The top-left corner of a rounded rectangle, shown in the Corners field. */
-function RoundCorner() {
+export function RoundCorner() {
   return (
     <svg viewBox="0 0 24 24" className="size-4 shrink-0 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
       <path d="M5 20V12a7 7 0 0 1 7-7h8" />
@@ -275,7 +348,7 @@ function RoundCorner() {
 }
 
 /** Three lines, each thicker than the last, shown in the line thickness field. */
-function Thickness() {
+export function Thickness() {
   return (
     <svg viewBox="0 0 24 24" className="size-4 shrink-0 text-muted-foreground" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden="true">
       <path d="M4 6h16" strokeWidth={1} />
@@ -296,6 +369,8 @@ export function ShapeProperties({ shape, next, onStyle, onTextFit, onTextColour,
     setWasTyping(typing)
     setTab(typing ? 'text' : 'shape')
   }
+  // A pick in the bar's Style widget shows the Shape tab, where the colours are.
+  usePanelTab((open) => open === 'shape-style' && setTab('shape'))
   const kind = shape ? shape.shapeKind : next.shape
   const style = shape ? { fill: shape.fill, stroke: shape.stroke, strokeWidth: shape.strokeWidth ?? 0, opacity: shape.opacity } : next.style
   const open = kind !== undefined && OPEN_SHAPES.has(kind)

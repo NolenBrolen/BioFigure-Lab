@@ -92,3 +92,8 @@
     }
   }
 }
+
+/* The letters picked in a chart text field, kept visible while its symbols popup has focus (ChartTextField). */
+::highlight(chart-text-kept) {
+  background-color: var(--color-primary-subtle);
+}

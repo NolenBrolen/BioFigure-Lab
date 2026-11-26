@@ -31,6 +31,8 @@ export type Tool = {
   shortcut?: string
   /** What the left panel shows for this tool. Leave out for a placeholder. */
   panel?: ReactNode
+  /** Keep the panel on the page, hidden, while another tool is open: for a panel that is slow to build or should keep its scroll and search (the icon library). */
+  keepMounted?: boolean
 }
 
 export type ToolRailProps = {
@@ -75,7 +77,7 @@ export function ToolRail({ tools, value, defaultValue, onValueChange, label = 'T
         ))}
       </TabsPrimitive.List>
       {tools.map((tool) => (
-        <TabsPrimitive.Panel key={tool.id} value={tool.id} className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel outline-none">
+        <TabsPrimitive.Panel key={tool.id} value={tool.id} keepMounted={tool.keepMounted} className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel outline-none">
           {tool.panel ?? <ToolPlaceholder label={tool.label} />}
         </TabsPrimitive.Panel>
       ))}

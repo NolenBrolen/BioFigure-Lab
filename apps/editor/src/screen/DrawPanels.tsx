@@ -73,7 +73,7 @@ export function ArrowsView({ figure, tool, arrow }: ArrowsProps) {
           if (!restyled) figure?.setTool('arrow')
         }}
       />
-      {arrow && <ArrowProperties arrow={arrow} usedColours={() => figure?.usedColours() ?? []} onChange={(patch) => figure?.change(patch)} />}
+      {arrow && <ArrowProperties arrow={arrow} usedColours={() => figure?.usedColours() ?? []} onChange={(patch) => figure?.change(patch)} onBend={(bend) => figure?.setArrowBend(bend)} onStyle={(change) => figure?.setArrowStyle(change)} />}
     </aside>
   )
 }

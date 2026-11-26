@@ -9,6 +9,7 @@ import { useCallback, useRef, useState } from 'react'
 
 import { FigureCanvas } from '../editor/FigureCanvas'
 import type { History } from '../editor/history'
+import { letterContexts, newSlideCanvas } from '../editor/panel-letters'
 import { oneSlide, type Slide } from '../editor/storage'
 import { newId } from '../editor/new-id'
 
@@ -32,12 +33,20 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
   const withCurrent = useCallback(
     (list: Slide[] = slidesRef.current, thumbnail = false): Slide[] => {
       if (!figure || figure.loading) return list
-      return list.map((slide) =>
-        slide.id === currentRef.current
-          ? { ...slide, canvas: figure.serialize(), thumbnail: thumbnail ? figure.thumbnail() : slide.thumbnail }
-          : slide,
-      )
+      return list.map((slide) => {
+        if (slide.id !== currentRef.current) return slide
+        const canvas = figure.serialize()
+        // A sync clash copy stops being marked as one once it's edited.
+        const clashCopy = canvas === slide.canvas ? slide.clashCopy : undefined
+        return { ...slide, canvas, thumbnail: thumbnail ? figure.thumbnail() : slide.thumbnail, clashCopy }
+      })
     },
+    [figure],
+  )
+
+  /** The slides with a new small picture of the one on the canvas, without turning the page into text again. */
+  const withPicture = useCallback(
+    (list: Slide[]): Slide[] => (figure && !figure.loading ? list.map((slide) => (slide.id === currentRef.current ? { ...slide, thumbnail: figure.thumbnail() } : slide)) : list),
     [figure],
   )
 
@@ -53,7 +62,7 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
       if (!slide || target === leaving) return
       currentRef.current = target
       setCurrentIdState(target)
-      const left = await figure.showSlide(slide.canvas, histories.current.get(target))
+      const left = await figure.showSlide(slide.canvas, histories.current.get(target), lettersOf(next, target))
       histories.current.set(leaving, left)
       histories.current.delete(target)
     })
@@ -61,9 +70,13 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
 
   const indexOf = (list: Slide[], id: string) => list.findIndex((slide) => slide.id === id)
 
+  /** Where a slide's letters start, from the slides before it (BIO-83). */
+  const lettersOf = (list: Slide[], id: string) => letterContexts(list.map((slide) => slide.canvas)).at(indexOf(list, id))
+
   const add = () => {
     const slide = oneSlide()
-    show(slide.id, (list) => list.toSpliced(indexOf(list, currentRef.current) + 1, 0, slide))
+    // A new slide starts with the letter look of the slide it follows.
+    show(slide.id, (list) => list.toSpliced(indexOf(list, currentRef.current) + 1, 0, { ...slide, canvas: newSlideCanvas(list.at(indexOf(list, currentRef.current))?.canvas) }))
   }
 
   const duplicate = (id: string) => {
@@ -77,7 +90,12 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
   const move = (id: string, index: number) => {
     const list = slidesRef.current
     const slide = list[indexOf(list, id)]
-    if (slide) setSlides(list.filter((item) => item.id !== id).toSpliced(index, 0, slide))
+    if (!slide) return
+    const moved = list.filter((item) => item.id !== id).toSpliced(index, 0, slide)
+    setSlides(moved)
+    // The slide on screen may now come after other letters.
+    const letters = lettersOf(moved, currentRef.current)
+    if (letters) figure?.setLetterStart(letters)
   }
 
   const remove = (id: string) => {
@@ -92,7 +110,10 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
       // Show the neighbour; the removed slide's undo steps stay kept in case of Undo.
       show((list) => list[Math.min(index, list.length - 1)].id, take)
     } else {
-      setSlides(take(slidesRef.current))
+      const rest = take(slidesRef.current)
+      setSlides(rest)
+      const letters = lettersOf(rest, currentRef.current)
+      if (letters) figure?.setLetterStart(letters)
     }
     const toastId = toasts.add({
       title: 'Slide deleted',
@@ -129,10 +150,11 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
       const resizedOn = currentRef.current
       const keptHistories = new Map(histories.current)
       keptHistories.set(resizedOn, figure.setPage(to))
+      const contexts = letterContexts(before.map((slide) => slide.canvas))
       const after = await Promise.all(
-        before.map(async (slide) => {
+        before.map(async (slide, i) => {
           if (slide.id === resizedOn) return { ...slide, canvas: figure.serialize(), thumbnail: figure.thumbnail() }
-          return slide.canvas ? { ...slide, ...(await FigureCanvas.fitSaved(slide.canvas, from, to)) } : slide
+          return slide.canvas ? { ...slide, ...(await FigureCanvas.fitSaved(slide.canvas, from, to, contexts.at(i))) } : slide
         }),
       )
       histories.current.clear()
@@ -146,7 +168,7 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
           figure.setPage(from, false)
           histories.current = keptHistories
           const showing = currentRef.current
-          await figure.showSlide(list.find((slide) => slide.id === showing)?.canvas, keptHistories.get(showing))
+          await figure.showSlide(list.find((slide) => slide.id === showing)?.canvas, keptHistories.get(showing), lettersOf(list, showing))
           histories.current.delete(showing)
         })
       }
@@ -164,5 +186,45 @@ export function useSlides(initial: Slide[], figure: FigureCanvas | null) {
     if (same) setSlides(list)
   }
 
-  return { slides, currentId, withCurrent, refresh, select: (id: string) => show(id), add, duplicate, move, remove, step, resizePage }
+  /**
+   * Take the slides as sync wrote them (changes from another device). The slide on the canvas is loaded again
+   * when it changed, unless it has edits not saved yet (`keepCanvas`): those stay, and the next save sends them.
+   * Slides whose contents changed lose their undo steps. Resolves to the list now shown.
+   */
+  const applyFromSync = (list: Slide[], keepCanvas: boolean): Promise<Slide[]> => {
+    const done = queue.current.then(async () => {
+      if (!figure) return slidesRef.current
+      const before = new Map(slidesRef.current.map((slide) => [slide.id, slide.canvas]))
+      for (const slide of list) if (before.get(slide.id) !== slide.canvas) histories.current.delete(slide.id)
+      const showing = currentRef.current
+      const incoming = list.find((slide) => slide.id === showing)
+      let next = list
+      if (!incoming) {
+        // The slide on screen was deleted elsewhere: show the first one.
+        const first = list[0]
+        setSlides(list)
+        if (first) {
+          currentRef.current = first.id
+          setCurrentIdState(first.id)
+          await figure.showSlide(first.canvas, histories.current.get(first.id), lettersOf(list, first.id))
+          histories.current.delete(first.id)
+        }
+        return list
+      }
+      if (keepCanvas) next = withCurrent(list)
+      else if (incoming.canvas !== before.get(showing)) await figure.showSlide(incoming.canvas, undefined, lettersOf(next, showing))
+      setSlides(next)
+      // Slides before this one may have come or gone.
+      const letters = lettersOf(next, showing)
+      if (letters) figure.setLetterStart(letters)
+      return next
+    })
+    queue.current = done.then(
+      () => undefined,
+      () => undefined,
+    )
+    return done
+  }
+
+  return { slides, currentId, withCurrent, withPicture, refresh, select: (id: string) => show(id), add, duplicate, move, remove, step, resizePage, applyFromSync }
 }

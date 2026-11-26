@@ -59,7 +59,7 @@ export function OptionCards<Value extends string>({ label, options, value, defau
           aria-label={option.detail ? `${option.label}, ${option.detail}` : option.label}
           className={cn(
             'group relative flex cursor-default flex-col items-center text-center outline-none select-none',
-            compact ? 'min-w-0 gap-0.5 rounded-md border border-input-border px-0.5 pt-1.5 pb-1' : 'gap-2 rounded-lg border p-3 pb-2.5',
+            compact ? 'min-w-0 gap-0.5 rounded-md border border-input-border px-0.5 pt-1.5 pb-1' : 'justify-center gap-2 rounded-lg border p-3',
             'transition-colors duration-(--duration-instant)',
             'not-data-checked:not-data-disabled:hover:border-border-strong not-data-checked:not-data-disabled:hover:bg-accent',
             'data-checked:border-primary data-checked:bg-primary-subtle data-checked:ring-1 data-checked:ring-primary',
@@ -72,7 +72,7 @@ export function OptionCards<Value extends string>({ label, options, value, defau
               <Check className="size-3" strokeWidth={3} aria-hidden="true" />
             </Radio.Indicator>
           )}
-          <span aria-hidden="true" className={cn(compact ? 'grid size-9 place-items-center [&>*]:max-h-full [&>*]:max-w-full' : 'w-12')}>
+          <span aria-hidden="true" className={cn(compact ? 'grid size-9 place-items-center [&>*]:max-h-full [&>*]:max-w-full' : 'grid w-12 place-items-center')}>
             {option.picture}
           </span>
           <span className="flex w-full min-w-0 flex-col">

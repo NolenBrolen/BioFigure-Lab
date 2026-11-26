@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { adjust, dunnettWithin, formatP, mannWhitney, oneWayAnova, pairedT, runTest, shapiroWilk, stars, tTest, welch, wilcoxonSignedRank } from './chart-stats'
+import { boxStats } from './chart-distribution'
+import { adjust, defaultCorrection, dunnettWithin, formatP, geisserGreenhouseEpsilon, mannWhitney, oneWayAnova, pairedT, runTest, shapiroWilk, spearmanExactP, stars, tTest, welch, wilcoxonSignedRank } from './chart-stats'
 
 const twoSidedTForTen = 0.0734 // R: 2 * pt(-2, 10)
 
@@ -74,8 +75,47 @@ describe('tests for three or more groups', () => {
     expect(runTest('welchanova', [[1, 2, 3.5], [4, 5.5, 6], [7, 8, 9.5]])?.comparisons).toHaveLength(3)
     const rm = runTest('rmanova', [[1, 2, 3, 4], [2, 3.2, 4.1, 5], [3, 4.1, 5.3, 7]])
     expect(rm?.comparisons).toHaveLength(3)
-    expect(rm?.note).toMatch(/^Repeated-measures ANOVA \(4 samples\)/)
+    expect(rm?.note).toMatch(/^Repeated-measures ANOVA \(4 samples\), Geisser-Greenhouse corrected, ε = /)
     expect(runTest('trend', steps)?.note).toMatch(/rising/)
+  })
+})
+
+describe('groups without spread, and groups too small', () => {
+  const noInfinity = (note: string | undefined) => expect(note ?? '').not.toMatch(/NaN|Infinity/)
+
+  it('gives no result when every value is the same', () => {
+    for (const test of ['anova', 'control', 'brownforsythe'] as const) expect(runTest(test, [[7, 7, 7], [7, 7, 7], [7, 7, 7]])).toBeUndefined()
+  })
+
+  it('says F cannot be computed, with no brackets, when each group is constant but the means differ', () => {
+    for (const test of ['anova', 'control'] as const) {
+      const result = runTest(test, [[5, 5, 5], [6, 6, 6], [7, 7, 7]])
+      expect(result?.comparisons).toEqual([])
+      expect(result?.note).toMatch(/can't be computed/)
+      noInfinity(result?.note)
+    }
+  })
+
+  it("leaves out Tukey's pairs when there are fewer than 2 degrees of freedom", () => {
+    const result = runTest('anova', [[4.2], [5.1, 6.3]])
+    expect(result?.comparisons).toEqual([])
+    expect(result?.note).toMatch(/Too few values in each group for Tukey/)
+    noInfinity(result?.note)
+  })
+
+  it('leaves out Games-Howell pairs with fewer than 2 degrees of freedom, and never writes NaN', () => {
+    const result = runTest('welchanova', [[1, 2], [3, 5], [8, 13]])
+    expect(result?.comparisons.every((c) => Number.isFinite(c.p))).toBe(true)
+    noInfinity(result?.note)
+  })
+
+  it('writes no NaN or Infinity for values too large to square', () => {
+    const big = 1e200
+    for (const test of ['anova', 'control', 'rmanova', 'welchanova', 'brownforsythe', 'ttest'] as const) {
+      const result = runTest(test, [[big, 2 * big, 3 * big], [4 * big, 5 * big, 7 * big]])
+      noInfinity(result?.note)
+      expect(result?.comparisons.every((c) => Number.isFinite(c.p)) ?? true).toBe(true)
+    }
   })
 })
 
@@ -112,5 +152,62 @@ describe('multiple comparisons and how p is shown', () => {
     expect([0.2, 0.04, 0.009, 0.0009, 0.00001].map(stars)).toEqual(['ns', '*', '**', '***', '****'])
     expect(formatP(0.0123)).toBe('p = 0.012')
     expect(formatP(0.00001)).toBe('p < 0.0001')
+  })
+})
+
+describe('repeated measures, Dunn and quartile methods', () => {
+  // Three conditions over six samples; the second differs from the first by a steady amount, the third scatters widely.
+  const raw = [
+    [10, 12, 9, 11, 10, 13],
+    [11, 13, 10, 12, 11, 14],
+    [14, 9, 18, 8, 15, 10],
+  ]
+
+  it('repeated-measures ANOVA multiplies the degrees of freedom by the Geisser-Greenhouse epsilon', () => {
+    const rows = raw[0]!.map((_, r) => raw.map((g) => g[r]!))
+    const epsilon = geisserGreenhouseEpsilon(rows)
+    expect(epsilon).toBeGreaterThanOrEqual(0.5) // lowest possible: 1 / (3 - 1)
+    expect(epsilon).toBeLessThan(0.9)
+    const note = runTest('rmanova', raw)!.note
+    expect(note).toContain(`ε = ${Number(epsilon.toPrecision(3))}`)
+    expect(note).toContain(`F(${Number((2 * epsilon).toPrecision(3))}, ${Number((10 * epsilon).toPrecision(3))})`)
+    expect(geisserGreenhouseEpsilon([[1, 2], [2, 3], [3, 5]])).toBe(1) // two groups: nothing to correct
+  })
+
+  it('repeated-measures post tests compare each pair on its own differences', () => {
+    // Groups 1 and 2 differ by exactly 1 in every sample: no spread, so p is 0 however wild the third group is.
+    const pairs = runTest('rmanova', raw)!.comparisons
+    expect(pairs.find((c) => c.a === 0 && c.b === 1)?.p).toBe(0)
+    expect(pairs.find((c) => c.a === 0 && c.b === 2)?.p).toBeGreaterThan(0.2)
+  })
+
+  it('finds quartiles by rank (n + 1)p', () => {
+    expect(boxStats([1, 2, 3, 4, 5, 6, 7, 8])).toMatchObject({ q1: 2.25, median: 4.5, q3: 6.75 })
+    expect(boxStats([3])).toMatchObject({ q1: 3, q3: 3 })
+    expect(boxStats([1, 2])).toMatchObject({ q1: 1, q3: 2 }) // ranks outside the data give the smallest and largest
+  })
+
+  it("starts Dunn's test with Bonferroni, but keeps a correction that was chosen", () => {
+    const groups = [[1, 2, 3, 4], [3, 4, 5, 6], [9, 10, 11, 12]]
+    expect(defaultCorrection('kruskal')).toBe('bonferroni')
+    expect(defaultCorrection('ttest')).toBe('holmsidak')
+    const given = runTest('kruskal', groups)!
+    expect(given.note).toContain('Bonferroni-corrected')
+    expect(given.comparisons).toEqual(runTest('kruskal', groups, { correction: 'bonferroni' })!.comparisons)
+    const chosen = runTest('kruskal', groups, { correction: 'holmsidak' })!
+    expect(chosen.note).toContain('Holm-Šidák-corrected')
+    expect(chosen.comparisons).not.toEqual(given.comparisons)
+  })
+
+  it('gives Spearman an exact p for few pairs without ties, and the t approximation otherwise', () => {
+    // Five pairs in perfect order: 2 of the 120 orderings are this extreme (and its mirror image)
+    expect(spearmanExactP(5, 0)).toBeCloseTo(2 / 120, 10)
+    expect(spearmanExactP(3, 2)).toBe(1)
+    const names = ['1', '2', '3', '4', '5']
+    expect(runTest('spearman', [[1], [2], [3], [4], [5]], { names })?.note).toMatch(/r = 1, n = 5, p = 0.017 \(exact\)/)
+    const tied = runTest('spearman', [[1, 1], [2], [3], [4], [5]], { names })!.note
+    expect(tied).toContain('approximate')
+    const long = runTest('spearman', Array.from({ length: 12 }, (_, i) => [i + (i % 3)]), { names: Array.from({ length: 12 }, (_, i) => String(i)) })!.note
+    expect(long).toContain('approximate')
   })
 })

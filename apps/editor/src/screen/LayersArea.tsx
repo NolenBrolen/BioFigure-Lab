@@ -5,7 +5,7 @@
  * this browser for next time.
  */
 import { LayersPanel, type LayersPanelProps } from '@biofigure-lab/ui/components/layers-panel/LayersPanel'
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { memo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 
 const KEY = 'biofigure-lab:layers-panel'
 const MIN = 96
@@ -30,7 +30,8 @@ function save(value: Saved): void {
   }
 }
 
-export function LayersArea(props: Omit<LayersPanelProps, 'collapsed' | 'onCollapsedChange' | 'className'>) {
+/** Memoised: it only redraws when the layers or the picked ones change, not with every move on the canvas (BIO-88). */
+export const LayersArea = memo(function LayersArea(props: Omit<LayersPanelProps, 'collapsed' | 'onCollapsedChange' | 'className'>) {
   const [state, setState] = useState(load)
   const area = useRef<HTMLDivElement>(null)
   const drag = useRef<{ startY: number; startHeight: number }>(undefined)
@@ -79,4 +80,4 @@ export function LayersArea(props: Omit<LayersPanelProps, 'collapsed' | 'onCollap
       <LayersPanel {...props} collapsed={state.collapsed} onCollapsedChange={(collapsed) => change({ collapsed })} className="min-h-0 flex-1" />
     </div>
   )
-}
+})

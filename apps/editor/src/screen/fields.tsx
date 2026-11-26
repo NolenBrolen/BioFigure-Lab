@@ -133,3 +133,27 @@ export function LiveTextArea({ label, value, placeholder, onType, onDone, rows =
     />
   )
 }
+
+/** A one-line text box that changes its object as you type (a panel's title). Enter or leaving it finishes. */
+export function LiveTextField({ label, value, placeholder, onType, onDone, className }: LiveFieldProps & { className?: string }) {
+  const { text, setText, setFocused } = useTyped(value)
+  return (
+    <TextField
+      label={label}
+      hideLabel
+      value={text}
+      placeholder={placeholder}
+      className={className}
+      onFocus={() => setFocused(true)}
+      onChange={(event) => {
+        setText(event.target.value)
+        onType(event.target.value)
+      }}
+      onKeyDown={blurOnEnter}
+      onBlur={() => {
+        setFocused(false)
+        onDone()
+      }}
+    />
+  )
+}

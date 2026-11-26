@@ -3,13 +3,20 @@
  * outline of how the values are spread, and dot positions that don't overlap.
  */
 
-/** The value a fraction q (0 to 1) of the way through sorted numbers, between neighbours (the usual "linear" quantile). */
+/**
+ * The value a fraction q (0 to 1) of the way through sorted numbers, the way
+ * common statistics software finds quartiles and percentiles: rank q * (n + 1), counted
+ * from 1 and interpolated between neighbours (Hyndman and Fan's definition 6,
+ * R's type 6). A rank outside the data gives the smallest or largest value.
+ * The median is the same in every method.
+ */
 export function quantile(sorted: number[], q: number): number {
-  if (sorted.length === 0) return NaN
-  const at = (sorted.length - 1) * q
-  const low = Math.floor(at)
-  const high = Math.ceil(at)
-  return (sorted[low] ?? 0) + ((sorted[high] ?? 0) - (sorted[low] ?? 0)) * (at - low)
+  const n = sorted.length
+  if (n === 0) return NaN
+  const rank = Math.min(Math.max(q * (n + 1), 1), n)
+  const low = Math.floor(rank)
+  const high = Math.ceil(rank)
+  return (sorted[low - 1] ?? 0) + ((sorted[high - 1] ?? 0) - (sorted[low - 1] ?? 0)) * (rank - low)
 }
 
 export type BoxStats = { min: number; q1: number; median: number; q3: number; max: number }

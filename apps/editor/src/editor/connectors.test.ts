@@ -1,7 +1,7 @@
 import { drawArrow } from '@biofigure-lab/ui/lib/arrow-geometry'
 import { describe, expect, it } from 'vitest'
 
-import { ANCHOR_GAP, ATTACH_GAP, arrowSvg, attachTargetAt, edgePoint, followEnds, sidePoint, type Frame } from './connectors'
+import { ANCHOR_GAP, ATTACH_GAP, arrowSvg, attachTargetAt, edgePoint, followEnds, sidePoint, straighten, type Frame } from './connectors'
 
 /** A 40 × 20 box (or ellipse) centred at (x, y), optionally turned by 90°. */
 const box = (x: number, y: number, { round = false, turned = false } = {}): Frame => ({
@@ -84,6 +84,22 @@ describe('arrows stuck to a side', () => {
   })
 })
 
+describe('straightening arrows drawn by hand (BIO-91)', () => {
+  const from = { x: 100, y: 100 }
+  it('puts a nearly level, upright or 45° end exactly on that line', () => {
+    // 3° off level, either way.
+    expect(straighten(from, { x: 300, y: 110 }).point).toEqual({ x: 300, y: 100 })
+    expect(straighten(from, { x: -100, y: 90 }).point).toEqual({ x: -100, y: 100 })
+    expect(straighten(from, { x: 108, y: 300 }).point).toEqual({ x: 100, y: 300 })
+    const diagonal = straighten(from, { x: 300, y: 290 }).point
+    expect(diagonal.x - from.x).toBeCloseTo(diagonal.y - from.y)
+  })
+
+  it('leaves an end that is clearly at another angle where it is', () => {
+    expect(straighten(from, { x: 300, y: 140 })).toEqual({ point: { x: 300, y: 140 } })
+  })
+})
+
 describe('arrow export', () => {
   it('writes arrows as plain SVG paths, so they stay vector in SVG and PDF', () => {
     const drawing = drawArrow({ x: 0, y: 0 }, { x: 100, y: 0 }, { route: 'curved', line: 'dashed', start: 'half', end: 'inhibition', mid: 'none' }, 2)
@@ -93,5 +109,16 @@ describe('arrow export', () => {
     expect(svg).toContain('stroke-dasharray="6 5"')
     // The half head is filled with the line colour.
     expect(svg).toContain('fill="#123456"')
+  })
+
+  it('exports an arrow\'s outline under it, in the outline colour, with sharp head corners kept', () => {
+    const drawing = drawArrow({ x: 0, y: 0 }, { x: 300, y: 0 }, { route: 'straight', line: 'solid', start: 'none', end: 'filled', mid: 'none' }, 20, undefined, { outline: 3 })
+    const svg = arrowSvg(drawing, { stroke: '#e11d48', strokeWidth: 20, outline: '#1f2937', outlineWidth: 3 })
+    expect(svg).toHaveLength(4)
+    expect(svg[0]).toContain('stroke="#1f2937" stroke-width="26"')
+    expect(svg[1]).toContain('fill="#1f2937"')
+    expect(svg[1]).toContain('stroke-miterlimit="10"')
+    // The head itself is a solid shape.
+    expect(svg[3]).toContain('fill="#e11d48" stroke="none"')
   })
 })

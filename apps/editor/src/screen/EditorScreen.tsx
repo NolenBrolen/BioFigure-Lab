@@ -26,8 +26,11 @@ import { useRowFocus } from '@biofigure-lab/ui/lib/row-focus'
 import { usePhoneLayout } from '@biofigure-lab/ui/lib/use-media-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { site } from '../site/site'
 import { menuSections, quickActionGroups } from '../editor/canvas-actions'
+import { emitAppEvent } from '../app-events'
 import { FigureCanvas, type CanvasState } from '../editor/FigureCanvas'
+import { letterContexts } from '../editor/panel-letters'
 import { actionForKey, finishesTyping, textActionForKey } from '../editor/shortcuts'
 import { DEFAULT_TEXT_STYLE } from '../editor/text-style'
 import { DEFAULT_CHOICE, type Tool } from '../editor/shapes'
@@ -36,9 +39,15 @@ import { PAGE_PRESETS, type PageMm } from '../editor/page-size'
 import { fitZoom, mmToPx, nextZoom } from '../editor/units'
 import { CanvasArea } from './CanvasArea'
 import { LayersArea } from './LayersArea'
+import { sameSnapshot, snapshotOf, type FigureSnapshot } from './figure-snapshot'
+import { BlocksView } from './BlocksView'
 import { ArrowsView, ShapesView } from './DrawPanels'
 import { ExportDialog } from './ExportDialog'
 import { NewFigureDialog } from './NewFigureDialog'
+import { withPanelMenu } from './detach-panel'
+import { sequenceActions, withSequenceMenu } from './sequence-actions'
+import { withCalloutMenu } from './callout-actions'
+import { withLegendMenu } from './legend-actions'
 import { TableView } from './TableView'
 import { ChartDataDrawer, dataPanelRoom, GraphView } from './GraphView'
 import { IconsView } from './IconsView'
@@ -47,14 +56,17 @@ import { iconById, loadIconSvg, placementSize } from '../editor/icon-library'
 import { PropertiesPanel } from './PropertiesPanel'
 import { TextStyleControls, TextView } from './TextView'
 import { TopBar } from './TopBar'
+import { VersionPreview } from './VersionPreview'
 import { ArrangeBar } from './ArrangeBar'
 import { debugTargets } from '../debug/debug-targets'
 import { useExport } from './useExport'
 import { useSlides } from './useSlides'
+import { PageBrightness, usePageBrightness } from './PageBrightness'
 import { useTheme } from './useTheme'
 import { BAR_SET_ITEMS, EDIT_TEXT, settingGroups, shapeBarSets, TYPE_TEXT, type BarSet } from './mobile-props'
 import { useKeyboardRoom } from './use-keyboard-room'
 import { usePinchZoom } from './usePinchZoom'
+import { QuickWidget } from './quick-widgets'
 
 /** The journal sizes in the page size menu above the canvas. */
 const PAGE_OPTIONS = PAGE_PRESETS.map((preset) => ({ value: preset.id, label: preset.label, ...preset.page }))
@@ -64,6 +76,8 @@ const pagePx = (page: PageMm) => ({ width: mmToPx(page.width), height: mmToPx(pa
 
 /** Phones: how much bigger new icons, shapes, arrows and text start than on a desktop (see `FigureCanvas.placeScale`). */
 const PHONE_PLACE_SCALE = 1.5
+/** An empty slide, for putting back a version that had nothing on it. */
+const EMPTY_SLIDE = JSON.stringify({ objects: [] })
 
 /** Phones: the Place button under each drawing tool's panel, and the tool it uses when none is picked yet. Text has none: its tab places text right away. */
 const PLACE_LABELS: Record<string, string> = { arrows: 'Place arrow', shapes: 'Place shape', graph: 'Place chart', table: 'Place table' }
@@ -80,32 +94,34 @@ type EditorScreenProps = {
   store: FigureStore
   /** Back to the start screen, after the last changes are saved. */
   onBack: () => void
+  /** Open the figure again from what's stored (sync changed its page size). */
+  onReload?: () => void
 }
 
-export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps) {
+export function EditorScreen({ figure: saved, store, onBack, onReload }: EditorScreenProps) {
   const [pageMm, setPageMm] = useState(saved.page)
   const page = useMemo(() => pagePx(pageMm), [pageMm])
   // The canvas is made once, at the size the figure had when opened; `setPage` changes it later.
   const [firstPage] = useState(page)
   const [customSizeOpen, setCustomSizeOpen] = useState(false)
   const toasts = useToast()
+  const feedback = site.useFeedback()
   const [name, setName] = useState(saved.name)
   const [saveFailed, setSaveFailed] = useState(false)
   const [state, setState] = useState(initialState)
-  // The chart data drawer under the page, shown while a chart is selected. Each chart keeps
-  // whether its drawer was minimised, so selecting it again shows the drawer the same way.
-  const [collapsedCharts, setCollapsedCharts] = useState<ReadonlySet<string>>(new Set())
+  useFigureEvents(state)
+  // The chart's data card stays closed until Edit data opens it, always full size (owner's call, 2026-11-25).
+  // It can shrink to a small card over the bottom of the canvas. It belongs to the chart it was opened for,
+  // so letting go of that chart closes it, and the next Edit data opens full size again.
+  const [dataCard, setDataCard] = useState<{ chart: string; full: boolean } | null>(null)
   const selectedChart = state.selection?.chart ? state.selectedLayerIds.join(',') : ''
-  const dataCollapsed = collapsedCharts.has(selectedChart)
-  const setDataCollapsed = (collapsed: boolean) =>
-    setCollapsedCharts((current) => {
-      const next = new Set(current)
-      if (collapsed) next.add(selectedChart)
-      else next.delete(selectedChart)
-      return next
-    })
+  const dataShown = dataCard !== null && dataCard.chart === selectedChart && selectedChart !== ''
+  const dataFull = dataShown && dataCard.full
+  const openData = (full: boolean) => setDataCard({ chart: selectedChart, full })
+  const closeData = () => setDataCard(null)
   const [figure, setFigure] = useState<FigureCanvas | null>(null)
   const [theme, toggleTheme] = useTheme()
+  const [pageBrightness, setPageBrightness] = usePageBrightness()
   const [snapToGrid, setSnapToGrid] = useState(false)
   // The open panel in the tool rail; a tool's key opens its panel too.
   const [railTool, setRailTool] = useState('icons')
@@ -117,9 +133,12 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
   const selectionKey = state.selectedLayerIds.join(',')
   const [openedFor, setOpenedFor] = useState('')
   const [propsOpen, setPropsOpen] = useState(false)
+  // Replacing the selected icon in a block's space: the library shows, and the next icon picked takes its place (BIO-97).
+  const [replacing, setReplacing] = useState(false)
   // A new selection opens its properties, also an icon just added from the library.
   if (home && selectionKey !== openedFor) {
     setOpenedFor(selectionKey)
+    setReplacing(false)
     setPropsOpen(true)
     setRailTool(home)
   } else if (!home && openedFor) {
@@ -176,12 +195,12 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
   const viewport = useRef<HTMLDivElement>(null)
   const sheetBody = useRef<HTMLDivElement>(null)
   // What is stored now, so opening a figure without changing it doesn't save (and move it to the top of the list).
-  const stored = useRef<{ fingerprint?: string; hasThumbnail: boolean }>({ hasThumbnail: Boolean(saved.thumbnail) })
+  const stored = useRef<{ fingerprint?: FigureSnapshot; hasThumbnail: boolean }>({ hasThumbnail: Boolean(saved.thumbnail) })
   const [firstCanvas] = useState(saved.slides[0]?.canvas)
   const slides = useSlides(saved.slides, figure)
-  const { withCurrent, refresh } = slides
+  const { withCurrent, withPicture, refresh } = slides
   /** What decides whether there is something new to save: the name and every slide's contents, in order. */
-  const fingerprint = useCallback((list: Figure['slides']) => JSON.stringify([name, pageMm, list.map((slide) => [slide.id, slide.canvas])]), [name, pageMm])
+  const fingerprint = useCallback((list: Figure['slides']) => snapshotOf(name, pageMm, list), [name, pageMm])
 
   // Make the Fabric canvas in its own fresh <canvas> element, so React's
   // second run of this effect in development never reuses a disposed one.
@@ -231,15 +250,19 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
   }, [figure, phone])
 
   // Room under the page while the chart's data panel floats over the canvas, so the page can scroll up above it.
-  const dataInset = state.selection?.chart ? dataPanelRoom(dataCollapsed) : undefined
+  const dataInset = dataShown && !dataFull ? dataPanelRoom() : undefined
 
+  // True while changes from another device are being put on screen (see below).
+  const applyingSync = useRef(false)
   const saveNow = useCallback(async () => {
-    if (!figure || figure.loading || stored.current.fingerprint === undefined) return
-    const list = withCurrent(slides.slides)
+    if (!figure || figure.loading || stored.current.fingerprint === undefined || applyingSync.current) return
+    // The latest list (not this render's), so slides that sync just replaced are never saved back as they were.
+    const list = withCurrent()
     const now = fingerprint(list)
-    if (now === stored.current.fingerprint && stored.current.hasThumbnail) return
+    if (sameSnapshot(now, stored.current.fingerprint) && stored.current.hasThumbnail) return
     stored.current = { fingerprint: now, hasThumbnail: true }
-    const withThumbnail = withCurrent(slides.slides, true)
+    // The page was just turned into text above; only its small picture is new (BIO-88).
+    const withThumbnail = withPicture(list)
     refresh(withThumbnail)
     try {
       await store.save(saved.id, { name, page: pageMm, slides: withThumbnail, thumbnail: withThumbnail[0]?.thumbnail })
@@ -247,7 +270,31 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
     } catch {
       setSaveFailed(true)
     }
-  }, [figure, name, pageMm, saved.id, store, slides.slides, withCurrent, refresh, fingerprint])
+  }, [figure, name, pageMm, saved.id, store, withCurrent, refresh, fingerprint, withPicture])
+
+  // Changes from another device (figure sync) while this figure is open: take the new slides and name. A new page
+  // size opens the figure again (simplest way to resize everything); a figure deleted elsewhere closes.
+  const { applyFromSync } = slides
+  useEffect(
+    () =>
+      store.subscribe((change) => {
+        if (change.source !== 'sync' || change.id !== saved.id || !figure) return
+        void store.get(saved.id).then((fresh) => {
+          if (!fresh) return onBack()
+          if (fresh.page.width !== pageMm.width || fresh.page.height !== pageMm.height) return onReload?.()
+          // Edits from the last moment that aren't saved yet stay on the canvas; the next save sends them.
+          const unsaved = stored.current.fingerprint !== undefined && !sameSnapshot(fingerprint(withCurrent()), stored.current.fingerprint)
+          // No saving until the new slides are in, or the old ones would be saved over them.
+          applyingSync.current = true
+          setName(fresh.name)
+          void applyFromSync(fresh.slides, unsaved).then((list) => {
+            if (!unsaved) stored.current = { fingerprint: snapshotOf(fresh.name, pageMm, list), hasThumbnail: true }
+            applyingSync.current = false
+          })
+        })
+      }),
+    [store, saved.id, figure, pageMm, fingerprint, withCurrent, applyFromSync, onBack, onReload],
+  )
 
   // The page as it looks once opened is the starting point for "has it changed".
   useEffect(() => {
@@ -295,6 +342,46 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
   }, [saveNow, state])
 
   const goBack = () => void saveNow().then(onBack)
+
+  // The same functions while the canvas stays the same, so the layers panel only redraws when its rows change (BIO-88).
+  const layerActions = useMemo(
+    () => ({
+      onSelect: (id: string, add: boolean) => figure?.selectLayer(id, add),
+      onRename: (id: string, name: string) => figure?.renameLayer(id, name),
+      onMove: (id: string, index: number) => figure?.moveLayer(id, index),
+      onToggleHidden: (id: string) => figure?.toggleLayerHidden(id),
+      onToggleLocked: (id: string) => figure?.toggleLayerLocked(id),
+    }),
+    [figure],
+  )
+
+  // Figure sync (live site only): its status, and clashes with another device (the site shows a toast with a way to the slide).
+  const { select: selectSlide } = slides
+  const sync = site.useFigureSync(saved.id, store, selectSlide)
+  // Sharing with people (live site only): the Share dialog and who else has the figure open.
+  const sharing = site.useFigureSharing({ id: saved.id, name, access: saved.access }, store, onBack)
+  // Version history of the slide on the canvas (live site only, BIO-36): look at an earlier version, put one back.
+  const slideHistory = site.useSlideHistory(
+    { id: saved.id, access: saved.access },
+    { id: slides.currentId, number: slides.slides.findIndex((slide) => slide.id === slides.currentId) + 1 },
+    {
+      putBack: async (canvas) => {
+        if (figure) await figure.replaceWith(canvas ?? EMPTY_SLIDE)
+      },
+      undo: () => figure?.undo(),
+    },
+  )
+  const previewing = slideHistory.preview !== null
+  // While an earlier version covers the canvas, nothing stays selected on the slide underneath.
+  useEffect(() => {
+    if (previewing) figure?.clearSelection()
+  }, [previewing, figure])
+  // This device's version of a slide that was also changed on another device carries a badge until it's edited.
+  const { deviceName } = sync
+  const stripSlides = useMemo(
+    () => (deviceName ? slides.slides.map((slide) => (slide.clashCopy ? { ...slide, badge: deviceName } : slide)) : slides.slides),
+    [slides.slides, deviceName],
+  )
 
   /** A new page size for every slide; what's on them scales to fit. A toast offers Undo. */
   const changePage = (to: PageMm) => {
@@ -424,8 +511,10 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
     void (async () => {
       const hidden = new FigureCanvas(document.createElement('canvas'), page)
       const svgs: string[] = []
-      for (const slide of list) {
-        await hidden.showSlide(slide.canvas)
+      // Each slide's letters go on from the slides before it, as on screen.
+      const contexts = letterContexts(list.map((slide) => slide.canvas))
+      for (const [i, slide] of list.entries()) {
+        await hidden.showSlide(slide.canvas, undefined, contexts.at(i))
         svgs.push(hidden.toSVG({ background: false }))
       }
       void hidden.dispose()
@@ -435,6 +524,7 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
 
   const pickTool = (id: string) => {
     setRailTool(id)
+    emitAppEvent({ name: 'tool', value: id })
     // Opening the Text panel turns on the text tool, so the next click on the page adds text.
     if (id === 'text') figure?.setTool('text')
     // Opening the Arrows panel turns on the arrow tool, unless arrows are selected to restyle.
@@ -455,8 +545,11 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
         icon={state.selection?.kind === 'icon' ? state.selection : undefined}
         open={openIn('icons')}
         onBack={backToTiles}
+        onReport={feedback.open}
+        waiting={state.selection?.kind === 'space' && !state.selection.locked ? { onCancel: () => figure?.clearSelection() } : undefined}
+        replace={state.selection?.heldIcon && !state.selection.locked ? { replacing, onStart: () => setReplacing(true), onCancel: () => setReplacing(false) } : undefined}
         // The SVG loads on first use (usually already cached by its library tile).
-        onAdd={(icon) => addIcon(async () => { const svg = await loadIconSvg(icon.id); return svg && figure?.addSvg(svg, icon.name, undefined, placementSize(icon) * (figure?.placeScale ?? 1), icon.id) })}
+        onAdd={(icon) => replacing && state.selection?.heldIcon ? addIcon(async () => { setReplacing(false); const svg = await loadIconSvg(icon.id); return svg && figure?.replaceHeldIcon(svg, icon.name, icon.id) }) : addIcon(async () => { const svg = await loadIconSvg(icon.id); return svg && figure?.addSvg(svg, icon.name, undefined, placementSize(icon) * (figure?.placeScale ?? 1), icon.id) })}
       />
     ),
     arrowsPanel: <ArrowsView figure={figure} tool={state.tool} arrow={state.selection?.kind === 'line' ? state.selection : undefined} />,
@@ -471,6 +564,7 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
         textControls={<TextStyleControls figure={figure} style={selectedShape?.text ?? state.nextShapeText} forShapes />}
       />
     ),
+    blocksPanel: <BlocksView figure={figure} panel={state.selection?.kind === 'panel' || state.selection?.kind === 'sequence' || state.selection?.kind === 'timeline' || state.selection?.kind === 'plate' || state.selection?.kind === 'legend' || state.selection?.kind === 'callout' ? state.selection : undefined} open={openIn('blocks')} onBack={backToTiles} />,
     graphPanel: (
       <GraphView
         figure={figure}
@@ -478,7 +572,13 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
         selection={state.selection?.chart ? state.selection : undefined}
         open={openIn('graph')}
         onBack={backToTiles}
-        onShowData={() => setDataCollapsed(false)}
+        onShowData={() => {
+          if (!phone) openData(true)
+        }}
+        datasets={store.datasets}
+        waiting={state.selection?.kind === 'chart-space' && !state.selection.locked ? { onCancel: () => figure?.clearSelection() } : undefined}
+        dataOpen={dataFull && !phone}
+        onCloseData={closeData}
       />
     ),
     tablePanel: <TableView figure={figure} selection={state.selection?.table ? state.selection : undefined} open={openIn('table')} onBack={backToTiles} />,
@@ -562,11 +662,19 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
         onRename={setName}
         onBack={goBack}
         saveFailed={saveFailed}
+        sync={sync.status}
+        onRetrySync={sync.retry}
+        onShare={sharing.open}
+        presence={sharing.presence}
+        onHistory={slideHistory.toggle}
+        historyOpen={slideHistory.open}
+        you={sharing.you}
         canUndo={state.canUndo}
         canRedo={state.canRedo}
         onUndo={() => figure?.undo()}
         onRedo={() => figure?.redo()}
         onExport={openExport}
+        onFeedback={feedback.open && (() => feedback.open?.())}
         theme={theme}
         onToggleTheme={toggleTheme}
         compact={phone}
@@ -585,6 +693,7 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
       <CanvasArea
         canvasHostRef={canvasHost}
         viewportRef={viewport}
+        cover={slideHistory.preview && <VersionPreview page={page} zoom={state.zoom} canvas={slideHistory.preview.canvas} label={slideHistory.preview.label} />}
         pageLabel={
           <>
             <PageSizeMenu
@@ -605,6 +714,11 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
               submitLabel="Change size"
               onCreate={changePage}
             />
+            {theme === 'dark' && (
+              <div className="ml-auto pl-2">
+                <PageBrightness value={pageBrightness} onValueChange={setPageBrightness} />
+              </div>
+            )}
           </>
         }
         tool={state.tool}
@@ -617,9 +731,19 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
           setPreviewOpen(true)
         }}
         onZoomFit={zoomToFit}
+        onBackdropPress={() => {
+          if (!figure?.canvas.getActiveObject()) return
+          figure.canvas.discardActiveObject()
+          figure.canvas.requestRenderAll()
+        }}
         // Phones: room under the page for the open sheet, so the page sits in view above it instead of behind it (owner's call, 2026-11-17).
         // The keyboard, while typing, slides the page up the same way.
         bottomInset={phone ? (keyboardRoom > 0 ? keyboardRoom + 16 : sheetOpen && sheetHeight > 0 ? sheetHeight + 16 : undefined) : dataInset}
+        onDragIconOver={(point) => {
+          const host = canvasHost.current?.getBoundingClientRect()
+          if (!figure || !host) return
+          figure.showIconDropAt(point && { x: (point.clientX - host.left) / figure.zoom, y: (point.clientY - host.top) / figure.zoom })
+        }}
         onDropIcon={(id, clientX, clientY) => {
           const icon = iconById(id)
           const host = canvasHost.current?.getBoundingClientRect()
@@ -630,8 +754,19 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
         }}
         selection={state.selection}
         transforming={state.transforming || sliding}
-        quickActions={(openMenu) => (figure && state.selection ? quickActionGroups(state.selection, figure, openMenu) : [])}
-        menuSections={figure ? menuSections(state.selection, figure, figure.canPaste) : []}
+        quickActions={(openMenu) =>
+          figure && state.selection
+            ? quickActionGroups(state.selection, figure, {
+                onMore: openMenu,
+                widget: (kind, close) => state.selection && <QuickWidget kind={kind} figure={figure} selection={state.selection} close={close} />,
+                // Phones open a chart's data from the property bar's Data item instead.
+                onEditData: phone ? undefined : () => openData(true),
+                phone,
+                sequences: sequenceActions(toasts, figure),
+              })
+            : []
+        }
+        menuSections={figure ? withLegendMenu(withCalloutMenu(withSequenceMenu(withPanelMenu(menuSections(state.selection, figure, figure.canPaste), state.selection, toasts, figure), state.selection, toasts, figure), state.selection, toasts, figure), state.selection, toasts, figure) : []}
         onRightClick={(x, y) => figure?.selectForMenu({ x, y })}
         compact={phone}
       />
@@ -688,11 +823,11 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
           </div>
         </BottomSheet>
       )}
-      {!phone && state.selection?.chart && <ChartDataDrawer figure={figure} chart={state.selection.chart} collapsed={dataCollapsed} onCollapsedChange={setDataCollapsed} />}
+      {!phone && dataShown && state.selection?.chart && <ChartDataDrawer figure={figure} chart={state.selection.chart} onClose={closeData} fullScreen={dataFull} onFullScreenChange={openData} />}
       </div>
       {!phone && <SlideStrip
         className="shrink-0"
-        slides={slides.slides}
+        slides={stripSlides}
         currentId={slides.currentId}
         aspect={page.width / page.height}
         onSelect={slides.select}
@@ -727,17 +862,19 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
             }}
           />
         )
+      ) : slideHistory.open ? (
+        <div className="flex min-h-0 flex-col bg-panel">{slideHistory.panel}</div>
       ) : (
         <div className="flex min-h-0 flex-col gap-px bg-border">
           {propertiesPanel}
           <LayersArea
             layers={state.layers}
             selectedIds={state.selectedLayerIds}
-            onSelect={(id, add) => figure?.selectLayer(id, add)}
-            onRename={(id, name) => figure?.renameLayer(id, name)}
-            onMove={(id, index) => figure?.moveLayer(id, index)}
-            onToggleHidden={(id) => figure?.toggleLayerHidden(id)}
-            onToggleLocked={(id) => figure?.toggleLayerLocked(id)}
+            onSelect={layerActions.onSelect}
+            onRename={layerActions.onRename}
+            onMove={layerActions.onMove}
+            onToggleHidden={layerActions.onToggleHidden}
+            onToggleLocked={layerActions.onToggleLocked}
           />
         </div>
       )}
@@ -748,6 +885,8 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
         // The figure's own SVG, drawn with the app's fonts; the page stretches it to its size in mm.
         figure={<div className="contents" dangerouslySetInnerHTML={{ __html: previewSvg }} />}
       />
+      {feedback.dialog}
+      {sharing.dialog}
       <ExportDialog
         open={exportOpen}
         onOpenChange={setExportOpen}
@@ -761,4 +900,15 @@ export function EditorScreen({ figure: saved, store, onBack }: EditorScreenProps
       />
     </div>
   )
+}
+
+/** Announces the figure was opened, and each undoable change that adds a layer (see app-events.ts). */
+function useFigureEvents(state: CanvasState) {
+  const layers = useRef<number | null>(null)
+  useEffect(() => emitAppEvent({ name: 'figure_opened' }), [])
+  useEffect(() => {
+    const before = layers.current
+    layers.current = state.layers.length
+    if (before !== null && state.canUndo && state.layers.length > before) emitAppEvent({ name: 'item_added' })
+  }, [state.layers.length, state.canUndo])
 }

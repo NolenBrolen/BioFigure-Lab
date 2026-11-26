@@ -9,7 +9,7 @@ const meta = {
   title: 'Components/Toggle',
   component: Toggle,
   args: { label: 'Snap to grid', defaultChecked: true },
-  argTypes: { variant: { control: 'inline-radio', options: ['switch', 'segmented', 'bar'] } },
+  argTypes: { variant: { control: 'inline-radio', options: ['bar', 'segmented'] } },
 } satisfies Meta<typeof Toggle>
 
 export default meta
@@ -33,17 +33,19 @@ function ToggleUses({ Section }: { Section: ComponentType<{ title: string; child
         </div>
       </Section>
 
+      <Section title="Label-left property rows: the bar fills the row, here with its own icons">
+        <div className="grid w-72 grid-cols-[5.25rem_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+          <span>Show text</span>
+          <Toggle label="Show text" hideLabel defaultChecked offIcon={<svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7V4h16v3M12 4v16M9 20h6" /><path d="M3 21 21 3" /></svg>} onIcon={<Type className="size-4" strokeWidth={2.25} />} />
+          <span>Legend</span>
+          <Toggle label="Legend" hideLabel />
+        </div>
+      </Section>
+
       <Section title="Off | On variant, where the state in words helps">
         <div className="flex w-64 flex-col gap-3">
           <Toggle variant="segmented" label="Transparent background" description="Only for PNG" />
           <Toggle variant="segmented" label="Snap to grid" defaultChecked />
-        </div>
-      </Section>
-
-      <Section title="Bar variant: a fat bar that is hard to miss, with its own icons">
-        <div className="flex w-64 flex-col gap-3">
-          <Toggle variant="bar" label="Show text" defaultChecked offIcon={<svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7V4h16v3M12 4v16M9 20h6" /><path d="M3 21 21 3" /></svg>} onIcon={<Type className="size-4" strokeWidth={2.25} />} />
-          <Toggle variant="bar" label="Snap to grid" />
         </div>
       </Section>
 

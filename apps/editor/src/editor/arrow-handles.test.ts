@@ -183,6 +183,34 @@ describe('arrow selection box', () => {
   })
 })
 
+describe('the bow of a curved arrow', () => {
+  const reopen = async (editor: FigureCanvas) => {
+    const element = document.createElement('canvas')
+    document.body.append(element)
+    const reopened = new FigureCanvas(element, { width: 600, height: 400 }, editor.serialize())
+    await expect.poll(() => reopened.canvas.getObjects().length).toBe(1)
+    return reopened.canvas.getObjects()[0] as Connector
+  }
+
+  it('is automatic for a new arrow and for a saved one that has no bend', async () => {
+    const { editor, arrow } = figure('curved')
+    expect(arrow.bend).toBeUndefined()
+    const saved = JSON.parse(editor.serialize()) as { objects: Record<string, unknown>[] }
+    expect(saved.objects[0]).not.toHaveProperty('bend')
+    expect((await reopen(editor)).bend).toBeUndefined()
+  })
+
+  it('is saved with the figure, and undo takes a changed bow back to automatic', async () => {
+    const { editor, arrow } = figure('curved')
+    editor.canvas.setActiveObject(arrow)
+    editor.setArrowBend(-0.3)
+    expect(arrow.bend).toBe(-0.3)
+    expect((await reopen(editor)).bend).toBe(-0.3)
+    editor.undo()
+    await expect.poll(() => (editor.canvas.getObjects()[0] as Connector).bend).toBeUndefined()
+  })
+})
+
 describe('snapping a dragged arrow end', () => {
   it('pulls the end onto the page edge, like moving an object does', () => {
     const { editor, arrow } = figure('straight')

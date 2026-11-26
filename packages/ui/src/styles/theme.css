@@ -3,7 +3,8 @@
  *
  * Neutral grey, docked panels separated by thin lines, a clear blue for the
  * main action. Calm, so the figure is what stands out, and it leaves the most
- * room for the canvas. Every colour has a light and a dark value.
+ * room for the canvas. Every colour has a light and a dark value; the dark
+ * values are the landing page's navy (apps/site/src/styles/global.css).
  *
  * The values are set on :root and again on every element with data-theme.
  * Tailwind rewrites light-dark() so older browsers understand it, and the
@@ -14,37 +15,37 @@
 :root,
 [data-theme] {
   /* Surfaces */
-  --background: light-dark(#ffffff, #18181b);
-  --foreground: light-dark(#18181b, #f4f4f5);
-  --panel: light-dark(#ffffff, #1c1c1f);
-  --canvas: light-dark(#f1f1f3, #101012);
-  --popover: light-dark(#ffffff, #26262a);
-  --popover-foreground: light-dark(#18181b, #f4f4f5);
-  --tooltip: light-dark(#ffffff, #26262a); /* small cards with a pointer, like popovers */
-  --tooltip-foreground: light-dark(#18181b, #f4f4f5);
+  --background: light-dark(#ffffff, #212837);
+  --foreground: light-dark(#18181b, #eef1f7);
+  --panel: light-dark(#ffffff, #242b3a);
+  --canvas: light-dark(#f1f1f3, #1a202c);
+  --popover: light-dark(#ffffff, #313b50);
+  --popover-foreground: light-dark(#18181b, #eef1f7);
+  --tooltip: light-dark(#ffffff, #313b50); /* small cards with a pointer, like popovers */
+  --tooltip-foreground: light-dark(#18181b, #eef1f7);
 
   /* Quiet fills and secondary text */
-  --muted: light-dark(#f4f4f5, #26262a);
-  --muted-foreground: light-dark(#63636b, #a1a1aa);
-  --accent: light-dark(#eeeef0, #2c2c31);
-  --accent-foreground: light-dark(#18181b, #f4f4f5);
+  --muted: light-dark(#f4f4f5, #2c3548);
+  --muted-foreground: light-dark(#63636b, #b3bdd0);
+  --accent: light-dark(#eeeef0, #313b50);
+  --accent-foreground: light-dark(#18181b, #eef1f7);
 
   /* Main action colour */
-  --primary: light-dark(#2563eb, #2563eb);
-  --primary-hover: light-dark(#1d4ed8, #1d58e0);
-  --primary-foreground: light-dark(#ffffff, #ffffff);
-  --primary-subtle: light-dark(#eaf0fe, #1c2a49);
-  --primary-subtle-hover: light-dark(#d2dffc, #1d315c);
-  --primary-subtle-foreground: light-dark(#1d4ed8, #a8c3fb);
+  --primary: light-dark(#2563eb, #7aa5ff);
+  --primary-hover: light-dark(#1d4ed8, #94b6ff);
+  --primary-foreground: light-dark(#ffffff, #0c1426);
+  --primary-subtle: light-dark(#eaf0fe, #34466d);
+  --primary-subtle-hover: light-dark(#d2dffc, #3a4e7a);
+  --primary-subtle-foreground: light-dark(#1d4ed8, #b4ccff);
 
   /* Lines, fields and focus */
-  --border: light-dark(#e6e6e9, #2c2c31);
-  --border-strong: light-dark(#cfcfd4, #44444b);
-  --input: light-dark(#ffffff, #1c1c1f); /* fields: a panel-coloured box with an outline */
+  --border: light-dark(#e6e6e9, #353f55);
+  --border-strong: light-dark(#cfcfd4, #4a5772);
+  --input: light-dark(#ffffff, #242b3a); /* fields: a panel-coloured box with an outline */
   /* Field outlines match the buttons' soft outline (owner's pick 2026-11-12; was #82828a / #7f7f87). */
   --input-border: var(--border-strong);
-  --input-border-hover: light-dark(#a9a9b0, #5c5c64);
-  --ring: light-dark(#2563eb, #6b9bf7);
+  --input-border-hover: light-dark(#a9a9b0, #64728f);
+  --ring: light-dark(#2563eb, #9dbdff);
   --selection: #2563eb; /* drawn on the white page, so the same in both modes */
 
   /* Status */
@@ -53,10 +54,22 @@
   --destructive-text: light-dark(#c81e1e, #f87171); /* red text on panels */
   --success: light-dark(#15803d, #4ade80);
   --warning: light-dark(#b45309, #fbbf24);
+  --warning-surface: light-dark(#fef6dc, #33290f); /* soft yellow behind a warning box */
+  --warning-border: light-dark(#f2cf6b, #6e5418);
+
+  /* Feedback kinds: one hue each, text (-foreground) on its soft tint (-subtle). Both pairs pass 4.5:1. */
+  --kind-bug-foreground: light-dark(#b91c1c, #fca5a5);
+  --kind-bug-subtle: light-dark(#fdecec, #3b1818);
+  --kind-idea-foreground: light-dark(#be1f8c, #f0abdc);
+  --kind-idea-subtle: light-dark(#fdeaf6, #3a1630);
+  --kind-icon-new-foreground: light-dark(#7c3aed, #c4b5fd);
+  --kind-icon-new-subtle: light-dark(#f3edff, #2a2142);
+  --kind-icon-problem-foreground: light-dark(#0e7490, #67e8f9);
+  --kind-icon-problem-subtle: light-dark(#e6f7fa, #11313a);
 
   /* Loading placeholders */
-  --skeleton: light-dark(#ececef, #2a2a2f);
-  --skeleton-highlight: light-dark(#f8f8f9, #36363c); /* the light band that sweeps across */
+  --skeleton: light-dark(#ececef, #2f384c);
+  --skeleton-highlight: light-dark(#f8f8f9, #3b4559); /* the light band that sweeps across */
 
   /* Corners: controls use 6 px */
   --radius: 6px;

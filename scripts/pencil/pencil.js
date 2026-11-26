@@ -512,11 +512,15 @@ function hatch(R, it, o) {
   const pt = (p) => g1(p[0]) + ' ' + g1(p[1]);
   const edge = () => (o.inset ?? 0) * (R() * 1.6 - 0.3) * -1 + (o.overrun ?? 0) * R();
   if (o.zigzag) {
-    let run = [], dir = 1;
+    let run = [], dir = 1, prev = null;
     const flush = () => { if (run.length > 1) parts.push('M' + run.map(pt).join('L')); run = []; };
     for (const ln of lines) {
-      if (!ln.spans.length) { flush(); continue; }
+      if (!ln.spans.length) { flush(); prev = null; continue; }
       const sp = ln.spans.reduce((a, b) => (b[1] - b[0] > a[1] - a[0] ? b : a));
+      // A span that doesn't overlap the previous line's lies in another piece of the shape
+      // (e.g. separate wedges in one path): lift the pencil instead of drawing across the gap.
+      if (prev && (sp[0] > prev[1] || sp[1] < prev[0])) { flush(); dir = 1; }
+      prev = sp;
       const s0 = sp[0] - edge(), s1 = sp[1] + edge();
       const w = ln.w + (R() - 0.5) * 0.4;
       if (dir > 0) run.push(at(s0, w), at(s1, w)); else run.push(at(s1, w), at(s0, w));

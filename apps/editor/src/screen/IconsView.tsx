@@ -17,23 +17,34 @@
  *
  * Label text (BIO-56): an icon whose library entry has a text slot (a bottle's
  * label) gets a "Show text" bar and a text block after the Signs row.
+ *
+ * Frame it (BIO-73): tabs Icon and Frame, like Shape and Text for shapes, and
+ * a Text tab for the caption once there is a frame. An unframed icon's Icon
+ * tab ends with a big "Add frame" button, which puts a soft tile around the
+ * icon and opens the Frame tab.
  */
+import { Button } from '@biofigure-lab/ui/components/button/Button'
 import { ColourInput } from '@biofigure-lab/ui/components/colour-input/ColourInput'
 import { IconButton } from '@biofigure-lab/ui/components/icon-button/IconButton'
 import { OptionCards } from '@biofigure-lab/ui/components/option-cards/OptionCards'
 import { SegmentedToggle } from '@biofigure-lab/ui/components/segmented-toggle/SegmentedToggle'
 import { Skeleton } from '@biofigure-lab/ui/components/skeleton/Skeleton'
+import { Tabs, TabsPanel } from '@biofigure-lab/ui/components/tabs/Tabs'
 import { Toggle } from '@biofigure-lab/ui/components/toggle/Toggle'
 import { cn } from '@biofigure-lab/ui/lib/cn'
-import { RotateCcw, Shell, Type } from 'lucide-react'
-import { useRef, type ReactNode } from 'react'
+import { Replace, RotateCcw, Shell, SquarePlus, Type } from 'lucide-react'
+import { createContext, use, useRef, useState, type ReactNode } from 'react'
 
 import { toHex } from '../editor/colour'
 import { MAX_LABEL_LINES, changeLineCount, lineCount, newLineMemory } from '../editor/label-lines'
 import type { FigureCanvas, SelectionInfo } from '../editor/FigureCanvas'
 import { ICON_STYLES, iconById, letterVersions, modeColour, needsLightBacking, signVersions, styleOf, styleVersion, type ColourMode, type IconStyle, type LibraryIcon } from '../editor/icon-library'
 import { LiveTextArea } from './fields'
+import { CaptionTextRows, FrameRows } from './FrameProperties'
 import { LibraryPanel } from './LibraryPanel'
+import { usePanelTab } from './panel-tab'
+import { useStableCallback } from './use-stable-callback'
+import { ReportIconButton } from './ReportIconButton'
 import { useIconSvg } from './useIconSvg'
 import { OpacityRow, PropRow, PropRows, PropertiesHeader, SizeRow } from './properties-pane'
 
@@ -46,41 +57,142 @@ type Props = {
   /** Back to the library; also lets go of the icon. */
   onBack: () => void
   onAdd: (icon: LibraryIcon) => void
+  /** Opens the feedback dialog for a library icon. Leave out when there is none: no Report issue. */
+  onReport?: (icon: LibraryIcon) => void
+  /** An empty icon space is selected: the next icon picked goes into it (BIO-74). Cancel lets go of it. */
+  waiting?: { onCancel: () => void }
+  /** An icon in a block's space is selected: Replace icon shows the library, and the next icon picked takes its place (BIO-97). */
+  replace?: { replacing: boolean; onStart: () => void; onCancel: () => void }
 }
 
-export function IconsView({ figure, icon, open, onBack, onAdd }: Props) {
-  const showProps = open && icon !== undefined
+export function IconsView({ figure, icon, open, onBack, onAdd, onReport, waiting, replace }: Props) {
+  const library = icon?.iconId ? iconById(icon.iconId) : undefined
+  const showProps = open && icon !== undefined && !replace?.replacing
+  // The same functions every render, so the library (hundreds of tiles) doesn't redraw with each change on the canvas.
+  const add = useStableCallback(onAdd)
+  const report = useStableCallback((picked: LibraryIcon) => onReport?.(picked))
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className={cn('flex min-h-0 flex-1 flex-col', showProps && 'hidden')}>
-        <LibraryPanel onAdd={onAdd} />
+        {replace?.replacing && (
+          <div role="status" className="mx-3 mt-3 flex items-center gap-2 rounded-md border border-primary/25 bg-primary-subtle px-2.5 py-2 text-xs text-primary-subtle-foreground">
+            <span className="min-w-0 flex-1">Click an icon to put it in place of the selected one.</span>
+            <Button size="sm" variant="ghost" onClick={replace.onCancel}>
+              Cancel
+            </Button>
+          </div>
+        )}
+        {waiting && (
+          <div role="status" className="mx-3 mt-3 flex items-center gap-2 rounded-md border border-primary/25 bg-primary-subtle px-2.5 py-2 text-xs text-primary-subtle-foreground">
+            <span className="min-w-0 flex-1">Click an icon to put it in the selected space, or drag one onto any space.</span>
+            <Button size="sm" variant="ghost" onClick={waiting.onCancel}>
+              Cancel
+            </Button>
+          </div>
+        )}
+        <LibraryPanel onAdd={add} onReport={onReport ? report : undefined} />
       </div>
       {showProps && (
         <aside aria-label="Icon" className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-panel [scrollbar-gutter:stable]">
           <PropertiesHeader backLabel="Back to icons" picture={<Shell className="size-5" />} name={icon.name} onBack={onBack} />
-          <PropRows>
-            <StyleRow figure={figure} icon={icon} />
-            <LettersRow figure={figure} icon={icon} />
-            <SignsRow figure={figure} icon={icon} />
-            <ColourModeRow figure={figure} icon={icon} />
-            <PropRow label="Colour" off={icon.colourMode === 'grey'}>
-              <ColourInput
-                label="Icon colour"
-                value={toHex(icon.fill)}
-                onChange={(fill) => fill && figure?.change({ fill })}
-                used={() => figure?.usedColours() ?? []}
-                className="min-w-0 flex-1"
-                // Recolouring tints every shade, so the icon's own colours can only come back from the library.
-                end={<IconButton icon={RotateCcw} label="Original colours" onClick={() => void figure?.resetIconColours()} />}
-              />
-            </PropRow>
-            <SizeRow width={icon.width} height={icon.height} onResize={(change, keep) => figure?.resize(change, keep)} />
-            <OpacityRow opacity={icon.opacity} onChange={(opacity) => figure?.change({ opacity })} />
-            <LabelTextRows figure={figure} icon={icon} />
-          </PropRows>
+          {/* An icon in a block's space can be swapped for another without leaving the block (BIO-97). */}
+          {replace && icon.heldIcon && (
+            <div className="px-3 pb-2">
+              <Button variant="secondary" size="sm" className="w-full gap-1.5" onClick={replace.onStart}>
+                <Replace aria-hidden="true" />
+                Replace icon
+              </Button>
+            </div>
+          )}
+          <IconTabs figure={figure} icon={icon}>
+            <PropRows>
+              <StyleRow figure={figure} icon={icon} />
+              <LettersRow figure={figure} icon={icon} />
+              <SignsRow figure={figure} icon={icon} />
+              <ColourModeRow figure={figure} icon={icon} />
+              <PropRow label="Colour" off={icon.colourMode === 'grey'}>
+                <ColourInput
+                  label="Icon colour"
+                  value={toHex(icon.fill)}
+                  onChange={(fill) => fill && figure?.change({ fill })}
+                  used={() => figure?.usedColours() ?? []}
+                  className="min-w-0 flex-1"
+                  // Recolouring tints every shade, so the icon's own colours can only come back from the library.
+                  end={<IconButton icon={RotateCcw} label="Original colours" onClick={() => void figure?.resetIconColours()} />}
+                />
+              </PropRow>
+              <SizeRow width={icon.width} height={icon.height} onResize={(change, keep) => figure?.resize(change, keep)} />
+              <OpacityRow opacity={icon.opacity} onChange={(opacity) => figure?.change({ opacity })} />
+              <LabelTextRows figure={figure} icon={icon} />
+              <FrameRow figure={figure} icon={icon} />
+            </PropRows>
+          </IconTabs>
+          {library && onReport && <ReportIconButton onClick={() => onReport(library)} />}
         </aside>
       )}
     </div>
+  )
+}
+
+/** Which tab shows; "Add frame" opens the Frame tab from inside the Icon tab. */
+const OpenTab = createContext<(tab: Tab) => void>(() => undefined)
+
+type Tab = 'icon' | 'frame' | 'text'
+
+/** The Icon and Frame tabs (BIO-73), the icon's own rows in the first. One selected icon only. */
+function IconTabs({ figure, icon, children }: { figure: FigureCanvas | null; icon: SelectionInfo; children: ReactNode }) {
+  const [tab, setTab] = useState<Tab>('icon')
+  // A pick in the bar's Frame widget shows the Frame tab, with the frame's finer settings.
+  usePanelTab((open) => open === 'icon-frame' && setTab('frame'))
+  if (icon.frame === undefined) return children
+  return (
+    <OpenTab value={setTab}>
+      {/* Text, for the caption, only once there is a frame; taking the frame off goes back to the Frame tab. */}
+      <Tabs
+        label="Icon properties"
+        value={tab === 'text' && !icon.frame ? 'frame' : tab}
+        onValueChange={(value) => setTab(value === 'frame' || value === 'text' ? value : 'icon')}
+        tabs={[{ value: 'icon', label: 'Icon' }, { value: 'frame', label: 'Frame' }, ...(icon.frame ? [{ value: 'text', label: 'Text' }] : [])]}
+      >
+        <TabsPanel value="icon">{children}</TabsPanel>
+        <TabsPanel value="frame">
+          {/* More room between rows than the Icon tab (its rows are tall tile groups); a label on its own line stays close to what it names. */}
+          <PropRows className="gap-y-3.5 [&_[data-wide-label]]:-mb-2">
+            <FrameRows figure={figure} icon={icon} />
+          </PropRows>
+        </TabsPanel>
+        {icon.frame && (
+          <TabsPanel value="text">
+            <CaptionTextRows figure={figure} icon={icon} />
+          </TabsPanel>
+        )}
+      </Tabs>
+    </OpenTab>
+  )
+}
+
+/**
+ * The Icon tab's last row, across the panel: a big Add frame button (version
+ * A, picked 2026-11-25). It adds a soft tile and opens the Frame tab. A framed
+ * icon has no Frame row: its frame is in the Frame tab, and picking No frame
+ * there brings the row back.
+ */
+function FrameRow({ figure, icon }: { figure: FigureCanvas | null; icon: SelectionInfo }) {
+  const openTab = use(OpenTab)
+  if (icon.frame !== null) return null
+  return (
+    <PropRow label="Frame" wide>
+      <Button
+        className="h-10 w-full gap-2 text-sm"
+        onClick={() => {
+          figure?.addFrame()
+          openTab('frame')
+        }}
+      >
+        <SquarePlus className="size-5" aria-hidden="true" />
+        Add frame
+      </Button>
+    </PropRow>
   )
 }
 
@@ -289,7 +401,7 @@ function TypeOff() {
 /** A library icon's picture for a property tile; it loads the SVG if it isn't loaded yet. */
 function LibraryPicture({ iconId, className }: { iconId: string; className?: string }) {
   const svg = useIconSvg(iconId)
-  return svg ? <img src={`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`} alt="" className={cn('size-full object-contain', className)} /> : <Skeleton className="size-full" />
+  return svg ? <img src={`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`} alt="" className={cn('size-full object-contain dark:brightness-(--page-dim)', className)} /> : <Skeleton className="size-full" />
 }
 
 /** Colour or greyscale, as a two-way toggle with a colour wheel and a grey wheel; a little taller than other controls. */

@@ -13,7 +13,15 @@ export type EndKind = 'none' | 'open' | 'filled' | 'activation' | 'inhibition' |
 export type MidMark = 'none' | 'tick'
 
 /** Everything that decides an arrow's look, apart from its colour and width. */
-export type ArrowLook = { route: Route; line: LineStyle; start: EndKind; end: EndKind; mid: MidMark }
+export type ArrowLook = {
+  route: Route
+  line: LineStyle
+  start: EndKind
+  end: EndKind
+  mid: MidMark
+  /** How far a curved arrow bows, as a share of its length (-0.5 to 0.5, 0.2 is the classic bow); left out, it is worked out from the arrow's angle (see `autoBend`). */
+  bend?: number | undefined
+}
 
 export type ArrowPreset = { id: string; name: string; start: EndKind; end: EndKind; mid: MidMark }
 
@@ -53,8 +61,23 @@ export const LINE_STYLES: { id: LineStyle; name: string }[] = [
 ]
 
 const CURVE_STEPS = 48
-/** How far a curved arrow bows out, as a share of its length. */
+/** How far a curved arrow bows out at most, as a share of its length. */
 const CURVE_BEND = 0.2
+/** The furthest a curve may bow either way, as a share of the arrow's length. */
+export const MAX_BEND = 0.5
+
+/**
+ * The bow of a curved arrow that has none set: the full 0.2 for near-horizontal
+ * and near-vertical arrows, softening to 0.08 on 45 degree diagonals, where
+ * the same bow looks forced.
+ */
+export function autoBend(a: XY, b: XY): number {
+  const angle = Math.atan2(b.y - a.y, b.x - a.x)
+  return CURVE_BEND * (1 - 0.6 * Math.abs(Math.sin(2 * angle)))
+}
+
+/** The bow an arrow really has: its own, or the automatic one. */
+export const effectiveBend = (a: XY, b: XY, bend?: number): number => bend ?? autoBend(a, b)
 /** How far a U-shaped arrow dips below both of its ends, as a share of the gap between them. */
 const U_DIP = 0.2
 /** The least a U-shaped arrow dips, so its two arms have room for their ends; never more than half the gap. */
@@ -74,7 +97,7 @@ const polyline = (points: readonly XY[], close = false) =>
 export type EndDirs = { start?: XY; end?: XY }
 
 /** The arrow's path from `a` to `b` as a list of points (curves are finely sampled). */
-export function routePoints(a: XY, b: XY, route: Route, dirs?: EndDirs): XY[] {
+export function routePoints(a: XY, b: XY, route: Route, dirs?: EndDirs, bend?: number): XY[] {
   if (route === 'u-shape') {
     // Out from the start (down, unless an end is attached to another side),
     // across beyond both ends, and back into the end, so it passes under
@@ -104,7 +127,8 @@ export function routePoints(a: XY, b: XY, route: Route, dirs?: EndDirs): XY[] {
     return [a, { x: midX, y: a.y }, { x: midX, y: b.y }, b]
   }
   if (route === 'straight') return [a, b]
-  const control = { x: (a.x + b.x) / 2 + (b.y - a.y) * CURVE_BEND * 2, y: (a.y + b.y) / 2 - (b.x - a.x) * CURVE_BEND * 2 }
+  const bow = effectiveBend(a, b, bend) * 2
+  const control = { x: (a.x + b.x) / 2 + (b.y - a.y) * bow, y: (a.y + b.y) / 2 - (b.x - a.x) * bow }
   return Array.from({ length: CURVE_STEPS + 1 }, (_, i) => {
     const t = i / CURVE_STEPS
     const u = 1 - t
@@ -144,15 +168,46 @@ function headingAtEnd(points: readonly XY[]): XY {
   return { x: 1, y: 0 }
 }
 
-/** One drawn piece of an arrow end: a path that is filled with the arrow's colour, or stroked like the line. */
+/**
+ * One drawn piece of an arrow end: a path stroked like the line, or a solid
+ * shape filled with the arrow's colour (and not stroked, so a thick arrow's
+ * head keeps its shape and sharp corners).
+ */
 export type ArrowPart = { d: string; filled: boolean }
 
-/** Size of an arrowhead for a given line width. */
-export const headSize = (strokeWidth: number) => Math.max(8, strokeWidth * 4)
+/**
+ * Size of an arrowhead for a given line width. It grows more slowly than the
+ * line: thin arrows keep their usual heads, and a thick one gets a head not
+ * much longer than the line is wide, like a block arrow. A longer arrow only
+ * gets a longer line.
+ */
+export const headSize = (strokeWidth: number) => Math.max(8, 6 + strokeWidth * 1.25)
+
+/** Ends drawn as lines (open heads, bars, circles, cups, forks): solid shapes take none of this. */
+const STROKED_ENDS: ReadonlySet<EndKind> = new Set(['open', 'activation', 'inhibition', 'catalysis', 'binding', 'axon'])
+
+/**
+ * Size of an end drawn as lines: as `headSize`, plus room for a thick line's
+ * own width, so a thick open head or circle keeps its shape instead of
+ * closing up into a blob. Thin arrows (2 px or less) are unchanged.
+ */
+const strokedSize = (strokeWidth: number) => headSize(strokeWidth) + Math.max(0, strokeWidth - 2)
+
+/** The most of an arrow's length its heads take together, so a short arrow keeps some line. */
+export const MAX_HEADS_SHARE = 0.8
+
+/** The head size an arrow along these points really gets: the usual one, made smaller when the arrow is too short for it. */
+function fittedHead(points: readonly XY[], look: ArrowLook, strokeWidth: number, kind?: EndKind): number {
+  const heads = [look.start, look.end].filter((end) => end !== 'none').length
+  const s = kind && STROKED_ENDS.has(kind) ? strokedSize(strokeWidth) : headSize(strokeWidth)
+  return heads === 0 ? s : Math.min(s, (pathLength(points) * MAX_HEADS_SHARE) / heads)
+}
 
 /** The drawn pieces of one end, and how much the line is shortened so it doesn't poke through them. */
-function endParts(kind: EndKind, tip: XY, dir: XY, s: number): { parts: ArrowPart[]; inset: number } {
+function endParts(kind: EndKind, tip: XY, dir: XY, s: number, strokeWidth = 0): { parts: ArrowPart[]; inset: number } {
   const n = { x: -dir.y, y: dir.x }
+  // Solid shapes aren't stroked, so they reach as far round the line as a stroked one would: half its width more.
+  const half = strokeWidth / 2
   // A point `back` along the line from the tip and `side` across it.
   const at = (back: number, side: number): XY => ({ x: tip.x - dir.x * back + n.x * side, y: tip.y - dir.y * back + n.y * side })
   const arc = (centreBack: number, r: number, from: number, to: number, steps = 16) =>
@@ -165,8 +220,11 @@ function endParts(kind: EndKind, tip: XY, dir: XY, s: number): { parts: ArrowPar
       return { parts: [], inset: 0 }
     case 'open':
       return { parts: [{ d: polyline([at(s, s * 0.5), tip, at(s, -s * 0.5)]), filled: false }], inset: 0 }
-    case 'filled':
-      return { parts: [{ d: polyline([tip, at(s, s * 0.45), at(s, -s * 0.45)], true), filled: true }], inset: s * 0.6 }
+    case 'filled': {
+      // The line ends well inside the head, so it stays hidden on a curve too.
+      const w = s * 0.45 + half
+      return { parts: [{ d: polyline([tip, at(s, w), at(s, -w)], true), filled: true }], inset: s * 0.7 }
+    }
     case 'activation':
       return { parts: [{ d: polyline([tip, at(s, s * 0.45), at(s, -s * 0.45)], true), filled: false }], inset: s }
     case 'inhibition':
@@ -180,12 +238,16 @@ function endParts(kind: EndKind, tip: XY, dir: XY, s: number): { parts: ArrowPar
       const r = s * 0.55
       return { parts: [{ d: polyline(arc(0, r, -Math.PI / 2, Math.PI / 2)), filled: false }], inset: r }
     }
-    case 'half':
-      return { parts: [{ d: polyline([tip, at(s, s * 0.5), at(s, 0)], true), filled: true }], inset: 0 }
+    case 'half': {
+      // A barb on one side, its long edge along the line's far edge; the line stops where the barb covers it.
+      const w = s * 0.5 + strokeWidth
+      return { parts: [{ d: polyline([at(0, -half), at(s, w - half), at(s, -half)], true), filled: true }], inset: (strokeWidth * s) / w }
+    }
     case 'synapse': {
       // A filled bulb with its flat face at the tip.
-      const r = s * 0.6
-      return { parts: [{ d: polyline(arc(0, r, -Math.PI / 2, Math.PI / 2), true), filled: true }], inset: r * 0.5 }
+      const r = s * 0.6 + half
+      // The line runs up to its flat face, so the bulb sits on it with no gap.
+      return { parts: [{ d: polyline(arc(0, r, -Math.PI / 2, Math.PI / 2), true), filled: true }], inset: 0 }
     }
     case 'axon':
       return {
@@ -198,18 +260,37 @@ function endParts(kind: EndKind, tip: XY, dir: XY, s: number): { parts: ArrowPar
 export type ArrowDrawing = {
   /** The line itself, stroked. */
   shaft: string
+  /** How the line's ends are drawn: flat for a solid line (so a thick arrow has a square tail), round for dashes and dots. */
+  cap: 'butt' | 'round'
+  /** The line for the outline, made longer by the outline's width at flat ends, so the outline goes round them; set when the arrow has an outline. */
+  outlineShaft?: string
   /** Dash pattern for the line, in the same units as the points; undefined for a solid line. */
   dash?: number[]
   /** Heads, bars and other end pieces. */
   parts: ArrowPart[]
 }
 
+/** An arrow's own sizes, besides its line width: its outline's width (0: none). */
+export type ArrowSize = { outline?: number }
+
+/** The points made `atStart` longer before the start and `atEnd` longer past the end, straight on. */
+function extend(points: readonly XY[], atStart: number, atEnd: number): XY[] {
+  const out = (end: XY, dir: XY, by: number): XY => ({ x: end.x + dir.x * by, y: end.y + dir.y * by })
+  const list = [...points]
+  if (atStart > 0) list.unshift(out(points.at(0)!, headingAtEnd(points.toReversed()), atStart))
+  if (atEnd > 0) list.push(out(points.at(-1)!, headingAtEnd(points), atEnd))
+  return list
+}
+
 /** Everything needed to draw an arrow from `a` to `b` with this look and line width. */
-export function drawArrow(a: XY, b: XY, look: ArrowLook, strokeWidth: number, dirs?: EndDirs): ArrowDrawing {
-  const s = headSize(strokeWidth)
-  const points = routePoints(a, b, look.route, dirs)
-  const end = endParts(look.end, b, headingAtEnd(points), s)
-  const start = endParts(look.start, a, headingAtEnd(points.toReversed()), s)
+export function drawArrow(a: XY, b: XY, look: ArrowLook, strokeWidth: number, dirs?: EndDirs, size: ArrowSize = {}): ArrowDrawing {
+  const points = routePoints(a, b, look.route, dirs, look.bend)
+  const s = fittedHead(points, look, strokeWidth)
+  const endSize = (kind: EndKind) => fittedHead(points, look, strokeWidth, kind)
+  // A curve's head points along the curve over the head's length, not just its last bit, so a thick head sits straight on the line.
+  const heading = (list: readonly XY[]) => (look.route === 'curved' ? headingAtEnd([trim(list, 0, s).at(-1)!, list.at(-1)!]) : headingAtEnd(list))
+  const end = endParts(look.end, b, heading(points), endSize(look.end), strokeWidth)
+  const start = endParts(look.start, a, heading(points.toReversed()), endSize(look.start), strokeWidth)
   const parts = [...start.parts, ...end.parts]
   if (look.mid === 'tick') {
     // A short bar across the middle of the line, like a membrane being crossed.
@@ -220,18 +301,66 @@ export function drawArrow(a: XY, b: XY, look: ArrowLook, strokeWidth: number, di
     parts.push({ d: polyline([{ x: centre.x - dir.y * s * 0.7, y: centre.y + dir.x * s * 0.7 }, { x: centre.x + dir.y * s * 0.7, y: centre.y - dir.x * s * 0.7 }]), filled: false })
   }
   const dash = look.line === 'dashed' ? [strokeWidth * 3, strokeWidth * 2.5] : look.line === 'dotted' ? [0.01, strokeWidth * 2.5] : undefined
-  return { shaft: polyline(trim(points, start.inset, end.inset)), ...(dash && { dash }), parts }
+  const shaft = trim(points, start.inset, end.inset)
+  const cap = look.line === 'solid' ? 'butt' : 'round'
+  // A flat end with nothing on it needs the outline across it too.
+  const outline = size.outline ?? 0
+  const flat = (kind: EndKind) => (cap === 'butt' && kind === 'none' ? outline : 0)
+  return {
+    shaft: polyline(shaft),
+    cap,
+    ...(outline > 0 && { outlineShaft: polyline(extend(shaft, flat(look.start), flat(look.end))) }),
+    ...(dash && { dash }),
+    parts,
+  }
 }
 
-/** The box an arrow takes up, with room for its heads and line width. */
-export function arrowBounds(a: XY, b: XY, look: ArrowLook, strokeWidth: number, dirs?: EndDirs): { left: number; top: number; width: number; height: number } {
-  const points = routePoints(a, b, look.route, dirs)
-  const pad = headSize(strokeWidth) * 0.8 + strokeWidth
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  const left = Math.min(...xs) - pad
-  const top = Math.min(...ys) - pad
-  return { left, top, width: Math.max(...xs) + pad - left, height: Math.max(...ys) + pad - top }
+/**
+ * One path to draw for an arrow, in order: the outline's paths first (when it
+ * has one: the same paths, wider, in the outline colour), then the arrow's
+ * own on top, so the outline shows only round its edge. `width` 0: only
+ * filled, not stroked (solid pieces). Outlines of solid pieces get sharp
+ * corners, like the pieces.
+ */
+export type ArrowStroke = { d: string; role: 'outline' | 'line'; width: number; filled: boolean; cap: 'butt' | 'round'; join: 'miter' | 'round'; dash?: number[] }
+
+export function arrowStrokes(drawing: ArrowDrawing, strokeWidth: number, outlineWidth = 0): ArrowStroke[] {
+  const pass = (role: 'outline' | 'line', extra: number): ArrowStroke[] => [
+    { d: role === 'outline' ? (drawing.outlineShaft ?? drawing.shaft) : drawing.shaft, role, width: strokeWidth + 2 * extra, filled: false, cap: drawing.cap, join: 'round', ...(drawing.dash && { dash: drawing.dash }) },
+    ...drawing.parts.map((part): ArrowStroke => ({ d: part.d, role, width: part.filled ? 2 * extra : strokeWidth + 2 * extra, filled: part.filled, cap: 'round', join: part.filled ? 'miter' : 'round' })),
+  ]
+  return outlineWidth > 0 ? [...pass('outline', outlineWidth), ...pass('line', 0)] : pass('line', 0)
+}
+
+/**
+ * Room between what an arrow draws and its box, in page pixels: the same for
+ * every thickness, so a thick arrow's box still fits it closely. Enough that,
+ * at 100% zoom, the side pills sit clear of the round end handles just past
+ * the arrow's tips (the owner's call, 2026-11-26: 8 px made them overlap).
+ */
+const BOX_MARGIN = 18
+
+/** The points a path written as M/L commands goes through. */
+const pathPoints = (d: string): XY[] => [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
+
+/**
+ * The box an arrow takes up: round what is drawn (its line, heads and
+ * outline) with a fixed margin, so a thick arrow's box fits it as closely as
+ * a thin one's.
+ */
+export function arrowBounds(a: XY, b: XY, look: ArrowLook, strokeWidth: number, dirs?: EndDirs, size: ArrowSize = {}): { left: number; top: number; width: number; height: number } {
+  const drawing = drawArrow(a, b, look, strokeWidth, dirs, size)
+  const outline = size.outline ?? 0
+  // Lines reach half their width past their points; solid heads only their outline, which a sharp tip pushes out further.
+  const reach = [
+    ...pathPoints(drawing.outlineShaft ?? drawing.shaft).map((p) => ({ p, pad: strokeWidth / 2 + outline })),
+    ...drawing.parts.flatMap((part) => pathPoints(part.d).map((p) => ({ p, pad: part.filled ? outline * 2.5 : strokeWidth / 2 + outline }))),
+  ]
+  const left = Math.min(...reach.map(({ p, pad }) => p.x - pad)) - BOX_MARGIN
+  const top = Math.min(...reach.map(({ p, pad }) => p.y - pad)) - BOX_MARGIN
+  const right = Math.max(...reach.map(({ p, pad }) => p.x + pad)) + BOX_MARGIN
+  const bottom = Math.max(...reach.map(({ p, pad }) => p.y + pad)) + BOX_MARGIN
+  return { left, top, width: right - left, height: bottom - top }
 }
 
 /* Shapes */

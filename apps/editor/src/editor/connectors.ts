@@ -8,7 +8,7 @@
  * passes underneath. Plain maths here; the canvas code feeds in where each
  * object is.
  */
-import type { ArrowDrawing } from '@biofigure-lab/ui/lib/arrow-geometry'
+import { arrowStrokes, type ArrowDrawing } from '@biofigure-lab/ui/lib/arrow-geometry'
 
 import type { XY } from './geometry'
 import { mmToPx } from './units'
@@ -137,11 +137,40 @@ export function attachTargetAt(point: XY, candidates: readonly { id: string; fra
 }
 
 /** An arrow as SVG elements: plain paths, so it stays sharp (vector) in SVG and PDF exports. */
-export function arrowSvg(drawing: ArrowDrawing, paint: { stroke: string; strokeWidth: number }): string[] {
-  const common = `stroke="${paint.stroke}" stroke-width="${paint.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"`
-  const dash = drawing.dash ? ` stroke-dasharray="${drawing.dash.join(' ')}"` : ''
-  return [
-    `<path d="${drawing.shaft}" fill="none" ${common}${dash} />\n`,
-    ...drawing.parts.map((part) => `<path d="${part.d}" fill="${part.filled ? paint.stroke : 'none'}" ${common} />\n`),
-  ]
+export function arrowSvg(drawing: ArrowDrawing, paint: { stroke: string; strokeWidth: number; outline?: string | undefined; outlineWidth?: number }): string[] {
+  const outline = paint.outline ? (paint.outlineWidth ?? 0) : 0
+  return arrowStrokes(drawing, paint.strokeWidth, outline).map((part) => {
+    const colour = part.role === 'outline' ? paint.outline! : paint.stroke
+    const dash = part.dash ? ` stroke-dasharray="${part.dash.join(' ')}"` : ''
+    // Mitred corners need the limit the canvas uses (SVG's own is lower, and would cut the half head's tip off).
+    const mitre = part.join === 'miter' ? ' stroke-miterlimit="10"' : ''
+    if (part.width === 0) return `<path d="${part.d}" fill="${colour}" stroke="none" />\n`
+    return `<path d="${part.d}" fill="${part.filled ? colour : 'none'}" stroke="${colour}" stroke-width="${part.width}" stroke-linecap="${part.cap}" stroke-linejoin="${part.join}"${mitre}${dash} />\n`
+  })
+}
+
+/** How close an arrow must be to level, upright or a 45° diagonal, in degrees, to snap straight onto it (as turning snaps within 4°). */
+export const STRAIGHT_SNAP_DEG = 4
+
+/**
+ * An arrow end moved onto the level, upright or 45° line through the other end
+ * (`from`) when it is within STRAIGHT_SNAP_DEG of one, so an arrow dragged by
+ * hand comes out straight; otherwise left where it is. `line` says which it
+ * snapped to: 'y' keeps the other end's height, 'x' its left-right place.
+ */
+export function straighten(from: XY, to: XY): { point: XY; line?: 'x' | 'y' | 'diagonal' } {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const length = Math.hypot(dx, dy)
+  if (length === 0) return { point: to }
+  const angle = Math.atan2(dy, dx)
+  const step = Math.PI / 4
+  const nearest = Math.round(angle / step) * step
+  if (Math.abs(angle - nearest) > (STRAIGHT_SNAP_DEG * Math.PI) / 180) return { point: to }
+  const index = ((Math.round(angle / step) % 8) + 8) % 8
+  if (index % 4 === 0) return { point: { x: to.x, y: from.y }, line: 'y' }
+  if (index % 4 === 2) return { point: { x: from.x, y: to.y }, line: 'x' }
+  // Along the diagonal, as far as the end is along it.
+  const along = dx * Math.cos(nearest) + dy * Math.sin(nearest)
+  return { point: { x: from.x + along * Math.cos(nearest), y: from.y + along * Math.sin(nearest) }, line: 'diagonal' }
 }

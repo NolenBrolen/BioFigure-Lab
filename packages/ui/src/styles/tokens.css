@@ -36,9 +36,13 @@
  * ------------------------------------------------------------------------ */
 :root {
   /* The figure page is white in light and dark mode, so the figure looks the
-     way it will in the journal. */
+     way it will in the journal. In dark mode the screen shows it a little
+     dimmer (brightness filter, --page-dim) so it doesn't glare; every colour
+     dims by the same amount and the export stays white. The editor's page
+     brightness slider (dark mode only) overrides it. */
   --page: #ffffff;
   --page-foreground: #111111;
+  --page-dim: 0.85;
 
   /* Animation timing. Short on purpose: the interface should feel instant. */
   --duration-instant: 60ms; /* hover, press */
@@ -90,6 +94,15 @@
 
   /* Skeleton placeholders: a light band sweeps across them from left to right. */
   --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  /* Content that swaps in (a tab's panel) fades in and rises a few pixels. Plays even when the system asks for less motion: it is small and shows what changed. */
+  --animate-panel-in: panel-in 200ms var(--ease-enter);
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      translate: 0 6px;
+    }
+  }
+
   @keyframes shimmer {
     from {
       background-position: 100% 0;
@@ -153,6 +166,18 @@
   --color-destructive-text: var(--destructive-text);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-warning-border: var(--warning-border);
+
+  /* Feedback kinds */
+  --color-kind-bug: var(--kind-bug-foreground);
+  --color-kind-bug-subtle: var(--kind-bug-subtle);
+  --color-kind-idea: var(--kind-idea-foreground);
+  --color-kind-idea-subtle: var(--kind-idea-subtle);
+  --color-kind-icon-new: var(--kind-icon-new-foreground);
+  --color-kind-icon-new-subtle: var(--kind-icon-new-subtle);
+  --color-kind-icon-problem: var(--kind-icon-problem-foreground);
+  --color-kind-icon-problem-subtle: var(--kind-icon-problem-subtle);
 
   /* Loading placeholders */
   --color-skeleton: var(--skeleton);

@@ -28,7 +28,7 @@ const preview: Preview = {
     layout: 'fullscreen',
     options: {
       storySort: {
-        order: ['Start here', 'Components', ['Button', 'Icon button', 'Text field', 'Search field', 'Tooltip', 'Slider', 'Toggle', 'Select', 'Skeleton', 'Menu', 'Popover', 'Dialog', 'Toast', 'Tabs', 'Panel', 'Toolbar'], 'Editor sample', 'Tokens'],
+        order: ['Start here', 'Components', ['Button', 'Icon button', 'Text field', 'Search field', 'Tooltip', 'Slider', 'Toggle', 'Select', 'Skeleton', 'Menu', 'Popover', 'Dialog', 'Toast', 'Account', 'Tabs', 'Panel', 'Toolbar'], 'Editor sample', 'Tokens'],
       },
     },
   },

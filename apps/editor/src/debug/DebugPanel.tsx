@@ -23,6 +23,7 @@ import { useRef, useState, type PointerEvent } from 'react'
 
 import { shapeAt, type ShapeTool } from '../editor/shapes'
 import { buttonRow } from './button-row'
+import type { FigureFile } from './figure-builder'
 import { debugTargets } from './debug-targets'
 
 const OPEN_KEY = 'biofigure-lab:debug-open'
@@ -83,7 +84,7 @@ export default function DebugPanel() {
   }
   return (
     <>
-      <div className="fixed bottom-2 left-2 z-50 opacity-50 hover:opacity-100 max-md:top-[calc(var(--topbar-height)+0.5rem)] max-md:bottom-auto">
+      <div className="fixed bottom-2 left-2 z-[60] opacity-50 hover:opacity-100 max-md:top-[calc(var(--topbar-height)+0.5rem)] max-md:bottom-auto">
         <IconButton icon={Bug} label={open ? 'Close debug panel' : 'Open debug panel'} size="sm" pressed={open} tooltipSide="right" onClick={toggle} />
       </div>
       {/* Above the button, not in Leva's usual top-right spot, where it would cover the top bar. */}
@@ -92,7 +93,7 @@ export default function DebugPanel() {
         // Popovers stay open while clicking here, so their look can be tuned with them open.
         data-keeps-popups-open
         style={place ? { left: place.x, top: place.y, bottom: 'auto', maxHeight: `calc(100vh - ${place.y + 8}px)` } : undefined}
-        className={`fixed bottom-10 left-2 z-50 max-h-[calc(100vh-3.5rem)] max-md:top-[calc(var(--topbar-height)+2.75rem)] max-md:bottom-auto max-md:max-h-[calc(100dvh-var(--topbar-height)-var(--mobile-bar-height)-4rem)] w-[340px] overflow-auto rounded-lg shadow-lg ${open ? '' : 'hidden'}`}
+        className={`fixed bottom-10 left-2 z-[60] max-h-[calc(100vh-3.5rem)] max-md:top-[calc(var(--topbar-height)+2.75rem)] max-md:bottom-auto max-md:max-h-[calc(100dvh-var(--topbar-height)-var(--mobile-bar-height)-4rem)] w-[340px] overflow-auto rounded-lg shadow-lg ${open ? '' : 'hidden'}`}
       >
         <div
           title="Drag to move; double-click to put it back"
@@ -168,6 +169,7 @@ function useTestStateControls() {
         'Clear figures': () => void clearFigures(),
         'Restore figures': () => void restoreFigures(),
       }),
+      'Load example figures': button(() => void loadExampleFigures()),
     }),
   }))
 }
@@ -205,6 +207,21 @@ async function clearFigures() {
   const earlier = JSON.parse(stored(CLEARED_KEY) ?? '[]') as string[]
   await Promise.all(figures.map((figure) => figureStore.remove(figure.id)))
   store(CLEARED_KEY, JSON.stringify([...earlier, ...figures.map((figure) => figure.id)]))
+  window.location.hash = ''
+  window.location.reload()
+}
+
+// The figures example-figures/build.mjs wrote (not in git until they are picked; the list is empty when there are none).
+const EXAMPLE_FILES = import.meta.glob<string>('../../../../example-figures/out/*.figure.json', { query: '?raw', import: 'default' })
+
+/** Adds every example figure to the figure list, replacing earlier copies with the same name, then reloads. */
+async function loadExampleFigures() {
+  const figureStore = debugTargets.store
+  if (!figureStore) return
+  const files = await Promise.all(Object.values(EXAMPLE_FILES).map(async (load) => JSON.parse(await load()) as FigureFile))
+  if (files.length === 0) return console.warn('No example figures found: run `node example-figures/build.mjs example-figures/specs/<name>.json` first')
+  const { importFigures } = await import('./figure-builder')
+  await importFigures(figureStore, files)
   window.location.hash = ''
   window.location.reload()
 }

@@ -25,6 +25,7 @@ it('leaves the debug panel out of the production build', { timeout: 120_000 }, a
       const code = await readFile(join(outDir, file), 'utf8')
       expect(code, file).not.toContain('Open debug panel')
       expect(code, file).not.toContain('biofigure-lab:debug-cleared')
+      expect(code, file).not.toContain('__figureBuilder')
     }
   } finally {
     process.env.NODE_ENV = nodeEnv

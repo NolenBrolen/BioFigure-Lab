@@ -12,10 +12,11 @@
  * heading, and the Groups view shows the groups as columns side by side (see
  * `GroupColumns`).
  */
-import { ChevronUp, GripVertical, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { ChartColumn, ChartLine, ChevronUp, GripVertical, Maximize2, Minimize2, Pencil, Plus, Trash2, X } from 'lucide-react'
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -25,6 +26,7 @@ import {
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type RefObject,
 } from 'react'
 
@@ -35,6 +37,17 @@ import { Tabs } from '../tabs/Tabs'
 
 export type DataView = 'table' | 'groups'
 export type DataGroup = { name: string; values: (number | null)[] }
+export type DataLine = {
+  /** The bars' and the line's measures, as headings over their tables. */
+  barsTitle: string
+  title: string
+  /** One list per group, in the groups' order. */
+  values: (number | null)[][]
+  onValue: (group: number, row: number, text: string) => void
+  /** A block pasted into a cell of the line's table. */
+  onPaste: (text: string, at: { group: number; row: number }) => void
+  onAddRow: () => void
+}
 
 export type ChartDataEditorProps = {
   groups: DataGroup[]
@@ -51,11 +64,29 @@ export type ChartDataEditorProps = {
   /** A group dragged to another place: it lands before the group now at `to`. */
   onMoveGroup: (from: number, to: number) => void
   onAddRow: () => void
+  /**
+   * Heatmaps: each row's name, typed in the table's first column instead of its number (a missing name is empty).
+   * A block pasted into that column has its names in its first column (`group` -1).
+   */
+  rowNames?: string[]
+  onRenameRow?: (row: number, name: string) => void
+  /**
+   * Bar + line charts: the line's values for each group (its second measure), shown as a second table, "Line", under
+   * the bars' one, and under each group's values in the Groups view. `title` names the two parts' headings.
+   */
+  line?: DataLine
   /** Phones: takes a row out of every group. */
   onRemoveRow?: (row: number) => void
   /** Minimised: only the header bar shows. One button minimises (×) and opens it again (↑). Without `onCollapsedChange` there is no such button. */
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
+  /** Closes the card (×). Takes the place of the minimise button when given. */
+  onClose?: () => void
+  /** Full screen: the card is shown over the whole canvas area (the app lays it out). Without `onFullScreenChange` there is no button, as on a phone. Escape inside the card leaves it. */
+  fullScreen?: boolean
+  onFullScreenChange?: (on: boolean) => void
+  /** Shown in a card in the bottom-right corner while in full screen (the app passes a live picture of the chart). */
+  preview?: ReactNode
   className?: string
   style?: CSSProperties
 }
@@ -111,10 +142,17 @@ function Cell({ value, label, onCommit, onPaste, onMove, className }: { value: s
 }
 
 export function ChartDataEditor(props: ChartDataEditorProps) {
-  const { view, onViewChange, onAddGroup, collapsed = false, onCollapsedChange, className, style } = props
+  const { view, onViewChange, onAddGroup, collapsed = false, onCollapsedChange, onClose, fullScreen = false, onFullScreenChange, preview, className, style } = props
   const expanded = useExpandedControls()
   return (
-    <section aria-label="Chart data" className={cn('flex min-h-0 flex-col bg-panel text-sm text-foreground', className)} style={style}>
+    <section aria-label="Chart data" className={cn('flex min-h-0 flex-col bg-panel text-sm text-foreground', className)} style={style}
+      onKeyDown={(event) => {
+        if (fullScreen && event.key === 'Escape' && onFullScreenChange) {
+          event.stopPropagation()
+          onFullScreenChange(false)
+        }
+      }}
+    >
       {/* Phones: the view switch starts where the first column of values does, past the row numbers. */}
       <div className={cn('flex h-10 shrink-0 items-center gap-3', expanded ? (view === 'groups' ? 'h-11 pl-[3.25rem]' : 'h-11 pl-8') : 'px-3', !collapsed && !expanded && 'border-b')}>
         {!expanded && <h2 className="font-medium">Data</h2>}
@@ -128,7 +166,6 @@ export function ChartDataEditor(props: ChartDataEditorProps) {
             { value: 'groups', label: 'Groups' },
           ]}
         />
-        <span className="hidden text-xs text-muted-foreground xl:inline">Type, or paste from Excel or Google Sheets</span>
         <div className="ml-auto flex items-center gap-1">
           {expanded ? (
             <button type="button" onClick={onAddGroup} className="flex h-11 items-center gap-1.5 rounded-md px-3 text-sm ring-1 ring-border ring-inset hover:bg-accent">
@@ -137,25 +174,337 @@ export function ChartDataEditor(props: ChartDataEditorProps) {
           ) : (
             <IconButton icon={Plus} label="Add group" size="sm" onClick={onAddGroup} />
           )}
-          {onCollapsedChange && <IconButton icon={collapsed ? ChevronUp : X} label={collapsed ? 'Show the data' : 'Minimise the data'} size="sm" aria-expanded={!collapsed} onClick={() => onCollapsedChange(!collapsed)} />}
+          {onFullScreenChange && <IconButton icon={fullScreen ? Minimize2 : Maximize2} label={fullScreen ? 'Exit full screen' : 'Full screen'} size="sm" onClick={() => onFullScreenChange(!fullScreen)} />}
+          {onClose ? (
+            <IconButton icon={X} label="Close the data" size="sm" onClick={onClose} />
+          ) : onCollapsedChange && <IconButton icon={collapsed ? ChevronUp : X} label={collapsed ? 'Show the data' : 'Minimise the data'} size="sm" aria-expanded={!collapsed} onClick={() => onCollapsedChange(!collapsed)} />}
         </div>
       </div>
-      {!collapsed && <div className={cn('min-h-0 flex-1', expanded ? 'pt-3' : 'overflow-auto p-3', expanded && view === 'table' && 'overflow-auto')}>{view === 'table' ? <TableView {...props} /> : <GroupsView {...props} />}</div>}
+      {!collapsed && (
+        <Body {...props} expanded={expanded} showPreview={fullScreen && !!preview && !expanded} />
+      )}
     </section>
   )
 }
 
-function TableView({ groups, colours, onValue, onRename, onPaste, onRemoveGroup, onMoveGroup, onAddRow }: ChartDataEditorProps) {
-  const drag = useGroupDrag(groups.length, onMoveGroup)
-  const rows = Math.max(1, ...groups.map((g) => g.values.length))
-  const headCell = 'border border-border bg-muted p-0 text-left font-medium'
+/** Rows drawn at least, when the box can't be measured yet (or is short), and extra rows kept above and below the view. */
+const WINDOW_MIN = 30
+const WINDOW_EXTRA = 10
+/** Fixed row heights, in px, so a long data set only draws the rows in view: a table row, and a row of four values in a group card (with its gap). */
+const TABLE_ROW = 28
+const CARD_ROW = 32
+
+/**
+ * Which rows of a long list to draw. The rows have a fixed height; `grid` is
+ * the element their first row starts at, inside a scrolling box marked
+ * `data-scroll`. Rows outside the view (plus a few spare ones) aren't drawn,
+ * the space they'd take is kept by the caller, so switching views or typing
+ * stays quick with hundreds of rows. A short list is drawn whole.
+ */
+function useRowWindow(rows: number, rowHeight: number, grid: RefObject<HTMLElement | null>, least = WINDOW_MIN) {
+  const [range, setRange] = useState({ start: 0, end: least })
+  useEffect(() => {
+    const element = grid.current
+    const box = element?.closest<HTMLElement>('[data-scroll]')
+    if (!element || !box) return
+    let frame = 0
+    const measure = () => {
+      frame = 0
+      const top = element.getBoundingClientRect().top - box.getBoundingClientRect().top
+      const height = box.clientHeight || least * rowHeight
+      const first = Math.floor(-top / rowHeight)
+      const last = Math.ceil((height - top) / rowHeight)
+      const start = Math.max(0, first - WINDOW_EXTRA)
+      const end = Math.min(rows, Math.max(last + WINDOW_EXTRA, start + least))
+      setRange((now) => (now.start === start && now.end === end ? now : { start, end }))
+    }
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure)
+    }
+    measure()
+    box.addEventListener('scroll', schedule, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule)
+    observer?.observe(box)
+    return () => {
+      box.removeEventListener('scroll', schedule)
+      observer?.disconnect()
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [grid, rows, rowHeight, least])
+  const end = Math.min(range.end, rows)
+  return { start: Math.min(range.start, end), end }
+}
+
+/** The corner card's width limits: at least this many px, at most this share of the data card's width. */
+const PREVIEW_MIN = 240
+const PREVIEW_MAX_SHARE = 0.8
+
+type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+/** Where each corner puts the card (12 px in from the edges). */
+const CORNER_CLASS: Record<Corner, string> = {
+  'top-left': 'top-3 left-3',
+  'top-right': 'top-3 right-3',
+  'bottom-left': 'bottom-3 left-3',
+  'bottom-right': 'bottom-3 right-3',
+}
+
+/** The corner mark (two short diagonal lines, like a text box's) is drawn for a bottom-right corner and flipped for the others. */
+const GRIP_FLIP: Record<Corner, string> = {
+  'bottom-right': '',
+  'bottom-left': 'scaleX(-1)',
+  'top-right': 'scaleY(-1)',
+  'top-left': 'scale(-1, -1)',
+}
+
+const opposite = (corner: Corner): Corner => `${corner.startsWith('top') ? 'bottom' : 'top'}-${corner.endsWith('left') ? 'right' : 'left'}` as Corner
+
+/**
+ * The data, and in full screen the chart's preview as a card in a corner of the data card, over the data. It starts
+ * bottom right, 360 px wide (`--data-preview-width`), its height following the chart. Drag the card to move it: it
+ * follows the pointer, and on letting go settles, with a little spring, into the nearest corner. Its resize mark sits
+ * on the corner facing the middle; dragging it makes the card larger or smaller, growing away from its corner. The
+ * card can be folded away to a small button. Corner and size are kept while the data card is open, not saved.
+ * At a bottom corner the data keeps room under the card, so every row can be scrolled clear of it; at a top corner
+ * the card floats over the table and nothing moves.
+ */
+function Body(props: ChartDataEditorProps & { expanded: boolean; showPreview: boolean }) {
+  const { view, expanded, showPreview, preview } = props
+  const [open, setOpen] = useState(true)
+  const [corner, setCorner] = useState<Corner>('bottom-right')
+  const [width, setWidth] = useState<number | null>(null)
+  const [cardHeight, setCardHeight] = useState(0)
+  const [offset, setOffset] = useState<{ x: number; y: number } | null>(null)
+  const body = useRef<HTMLDivElement>(null)
+  const card = useRef<HTMLDivElement>(null)
+  const resize = useRef<{ x: number; width: number; max: number } | null>(null)
+  const move = useRef<{ x: number; y: number; centre: { x: number; y: number } } | null>(null)
+  const settleFrom = useRef<DOMRect | null>(null)
+  const top = corner.startsWith('top')
+  const left = corner.endsWith('left')
+  const gripAt = opposite(corner)
+
+  // How tall the card (or the button it folds into) is, so the data can leave that much room.
+  useEffect(() => {
+    const element = card.current
+    if (!showPreview || !element) return
+    const measure = () => setCardHeight(element.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [showPreview, open])
+
+  // After letting go: the card is now at its new corner; start it where it was dropped and let it settle in with a little spring.
+  useLayoutEffect(() => {
+    const element = card.current
+    const from = settleFrom.current
+    settleFrom.current = null
+    if (!element || !from) return
+    const to = element.getBoundingClientRect()
+    const calm = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    element.style.transition = 'none'
+    element.style.transform = `translate(${from.left - to.left}px, ${from.top - to.top}px)`
+    void element.offsetWidth
+    element.style.transition = calm ? 'transform 120ms ease-out' : 'transform 350ms cubic-bezier(0.34, 1.56, 0.64, 1)'
+    element.style.transform = ''
+  }, [corner])
+
+  // Room to scroll the last rows clear of a card at a bottom corner. A card at a top corner just floats over the table: nothing moves.
+  const roomStyle = showPreview && !top ? { paddingBottom: `calc(0.75rem + 0.75rem + ${cardHeight}px)` } : undefined
+  const data = (
+    <div data-scroll className={cn('min-h-0 min-w-0', expanded ? 'pt-3' : 'h-full overflow-auto p-3', expanded && view === 'table' && 'overflow-auto')} style={roomStyle}>
+      {view === 'table' ? <TableView {...props} /> : <GroupsView {...props} />}
+    </div>
+  )
+  if (!showPreview) return <div className="min-h-0 flex-1">{data}</div>
+
+  const capture = (event: ReactPointerEvent<HTMLElement>) => {
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // No pointer to capture (it is already gone); the move and up events still arrive where they can.
+    }
+  }
+
+  const startResize = (event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const now = card.current?.getBoundingClientRect().width ?? 0
+    const room = body.current?.getBoundingClientRect().width ?? 0
+    resize.current = { x: event.clientX, width: now, max: Math.max(PREVIEW_MIN, room * PREVIEW_MAX_SHARE) }
+    capture(event)
+  }
+  const moveResize = (event: ReactPointerEvent<HTMLElement>) => {
+    const start = resize.current
+    if (!start) return
+    // The card grows away from its corner: dragging toward the middle makes it larger.
+    const grow = left ? event.clientX - start.x : start.x - event.clientX
+    setWidth(Math.round(Math.min(start.max, Math.max(PREVIEW_MIN, start.width + grow))))
+  }
+
+  const startMove = (event: ReactPointerEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return
+    event.preventDefault()
+    const rect = card.current?.getBoundingClientRect()
+    move.current = { x: event.clientX, y: event.clientY, centre: { x: (rect?.left ?? 0) + (rect?.width ?? 0) / 2, y: (rect?.top ?? 0) + (rect?.height ?? 0) / 2 } }
+    capture(event)
+  }
+  const doMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const start = move.current
+    if (start) setOffset({ x: event.clientX - start.x, y: event.clientY - start.y })
+  }
+  const endMove = () => {
+    const start = move.current
+    move.current = null
+    if (!start) return
+    const dropped = card.current?.getBoundingClientRect()
+    const room = body.current?.getBoundingClientRect()
+    const dx = offset?.x ?? 0
+    const dy = offset?.y ?? 0
+    setOffset(null)
+    if (!dropped || !room) return
+    const x = start.centre.x + dx
+    const y = start.centre.y + dy
+    const next = `${y < room.top + room.height / 2 ? 'top' : 'bottom'}-${x < room.left + room.width / 2 ? 'left' : 'right'}` as Corner
+    settleFrom.current = dropped
+    setCorner(next)
+  }
+
+  const gripTop = gripAt.startsWith('top')
+  const gripLeft = gripAt.endsWith('left')
+  return (
+    <div ref={body} className="relative min-h-0 flex-1">
+      {data}
+      {open ? (
+        <div
+          ref={card}
+          role="group"
+          aria-label="Chart preview card"
+          data-corner={corner}
+          className={cn('absolute flex max-h-[70%] max-w-[80%] touch-none flex-col overflow-hidden rounded-lg border bg-panel shadow-(--elevation-lg) select-none', CORNER_CLASS[corner], offset ? 'cursor-grabbing' : 'cursor-grab')}
+          style={{ width: width === null ? 'var(--data-preview-width, 360px)' : `${width}px`, ...(offset ? { transform: `translate(${offset.x}px, ${offset.y}px)`, transition: 'none' } : undefined) }}
+          onPointerDown={startMove}
+          onPointerMove={doMove}
+          onPointerUp={endMove}
+          onPointerCancel={endMove}
+        >
+          <div
+            data-resize-grip
+            data-grip={gripAt}
+            aria-hidden="true"
+            title="Drag to resize, double-click to reset"
+            className={cn('absolute z-10 grid size-4 place-items-center text-muted-foreground', gripTop ? 'top-0' : 'bottom-0', gripLeft ? 'left-0' : 'right-0', gripAt === 'top-left' || gripAt === 'bottom-right' ? 'cursor-nwse-resize' : 'cursor-nesw-resize')}
+            onPointerDown={startResize}
+            onPointerMove={moveResize}
+            onPointerUp={() => (resize.current = null)}
+            onPointerCancel={() => (resize.current = null)}
+            onDoubleClick={() => setWidth(null)}
+          >
+            <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" style={{ transform: GRIP_FLIP[gripAt] }}>
+              <path d="M11 4 4 11M11 8 8 11" />
+            </svg>
+          </div>
+          <div className={cn('flex h-8 shrink-0 items-center justify-between text-xs font-medium text-muted-foreground', gripTop && gripLeft ? 'pr-1 pl-6' : gripTop ? 'pr-6 pl-3' : 'pr-1 pl-3')}>
+            Chart preview
+            <IconButton icon={Minimize2} label="Hide the preview" size="sm" onClick={() => setOpen(false)} />
+          </div>
+          <div className="min-h-0 flex-1">{preview}</div>
+        </div>
+      ) : (
+        <div ref={card} className={cn('absolute rounded-lg border bg-panel shadow-(--elevation-lg)', CORNER_CLASS[corner])}>
+          <IconButton icon={ChartColumn} label="Show the preview" size="sm" onClick={() => setOpen(true)} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A heading over one of a bar + line chart's two tables: what it holds, and its measure's name. */
+function PartHeading({ part, title }: { part: string; title: string }) {
+  return (
+    <h3 className="text-xs font-medium">
+      {part}
+      {title.trim() && title.trim() !== part && <span className="font-normal text-muted-foreground"> · {title}</span>}
+    </h3>
+  )
+}
+
+/**
+ * A bar + line chart's line values: one column per group (named as in the bars' table above, which is where groups are
+ * renamed, added and moved), one row per replicate. Short, so it is drawn whole.
+ */
+function LineTable({ groups, colours, line }: { groups: DataGroup[]; colours: string[]; line: DataLine }) {
+  const rows = Math.max(1, ...line.values.map((values) => values.length))
   return (
     <div className="flex flex-col items-start gap-2">
-      <table data-grid className="border-collapse text-xs tabular-nums">
+      <PartHeading part="Line" title={line.title} />
+      <table data-grid aria-label="Line values" className="border-collapse text-xs tabular-nums">
         <thead>
           <tr>
             <th scope="col" className="w-8 border border-border bg-muted px-1.5 text-right font-normal text-muted-foreground">
               <span className="sr-only">Row</span>
+            </th>
+            {groups.map((g, c) => (
+              <th key={c} scope="col" className="w-32 border border-border bg-muted px-1.5 py-1 text-left font-medium" style={{ boxShadow: `inset 0 3px ${colours[c % colours.length]}` }}>
+                <div className="w-32 truncate pl-5">{g.name || `Group ${c + 1}`}</div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rows }, (_, r) => (
+            <tr key={r} style={{ height: TABLE_ROW }}>
+              <th scope="row" className="border border-border bg-muted px-1.5 text-right font-normal text-muted-foreground">{r + 1}</th>
+              {groups.map((g, c) => (
+                <td key={c} className="border border-border p-0" data-cell={`${r},${c}`}>
+                  <Cell value={show(line.values[c]?.[r])} label={`Line, ${g.name || `group ${c + 1}`}, row ${r + 1}`} onCommit={(text) => line.onValue(c, r, text)} onPaste={(text) => line.onPaste(text, { group: c, row: r })} className="h-7 text-right" />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button type="button" onClick={line.onAddRow} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+        <Plus className="size-3.5" /> Row
+      </button>
+    </div>
+  )
+}
+
+function TableView(props: ChartDataEditorProps) {
+  const { line } = props
+  if (!line) return <BarTable {...props} />
+  // Side by side, so the line's table shows in the short data card without scrolling down to it.
+  // The bars' block keeps room on its right for its New column button (8 px gap, 8rem wide), then a gap.
+  return (
+    <div className="flex items-start gap-6">
+      <div className="mr-[8.5rem] flex shrink-0 flex-col items-start gap-2">
+        <PartHeading part="Bars" title={line.barsTitle} />
+        <BarTable {...props} />
+      </div>
+      <LineTable groups={props.groups} colours={props.colours} line={line} />
+    </div>
+  )
+}
+
+function BarTable({ groups, colours, onValue, onRename, onPaste, onAddGroup, onRemoveGroup, onMoveGroup, onAddRow, rowNames, onRenameRow }: ChartDataEditorProps) {
+  const named = rowNames !== undefined && onRenameRow !== undefined
+  const drag = useGroupDrag(groups.length, onMoveGroup)
+  const rows = Math.max(1, ...groups.map((g) => g.values.length))
+  const body = useRef<HTMLTableSectionElement>(null)
+  const { start, end } = useRowWindow(rows, TABLE_ROW, body)
+  const headCell = 'border border-border bg-muted p-0 text-left font-medium'
+  return (
+    <div className="flex flex-col items-start gap-2">
+      {/* The Add column button is one dashed box the height of the whole table, 8 px to its right. */}
+      <div className="relative w-max">
+      <table data-grid className="border-collapse text-xs tabular-nums">
+        <thead>
+          <tr>
+            <th scope="col" className={cn('border border-border bg-muted px-1.5 font-normal text-muted-foreground', named ? 'w-32 text-left' : 'w-8 text-right')}>
+              {named ? 'Row name' : <span className="sr-only">Row</span>}
             </th>
             {groups.map((g, c) => (
               <th key={c} scope="col" className={cn(headCell, drag.over === c && 'shadow-[inset_2px_0_0_var(--primary)]')} style={{ boxShadow: drag.over === c ? undefined : `inset 0 3px ${colours[c % colours.length]}` }} {...drag.target(c)}>
@@ -166,22 +515,54 @@ function TableView({ groups, colours, onValue, onRename, onPaste, onRemoveGroup,
                 </div>
               </th>
             ))}
-            <th aria-hidden className={cn('w-2 p-0', drag.over === groups.length && 'shadow-[inset_2px_0_0_var(--primary)]')} {...drag.target(groups.length)} />
+            <th aria-hidden="true" className={cn('w-2 p-0', drag.over === groups.length && 'shadow-[inset_2px_0_0_var(--primary)]')} {...drag.target(groups.length)} />
           </tr>
         </thead>
-        <tbody>
-          {Array.from({ length: rows }, (_, r) => (
-            <tr key={r}>
-              <th scope="row" className="border border-border bg-muted px-1.5 text-right font-normal text-muted-foreground">{r + 1}</th>
-              {groups.map((g, c) => (
-                <td key={c} className="border border-border p-0" data-cell={`${r},${c}`}>
-                  <Cell value={show(g.values[r])} label={`${g.name || `Group ${c + 1}`}, row ${r + 1}`} onCommit={(text) => onValue(c, r, text)} onPaste={(text) => onPaste(text, { group: c, row: r })} className="text-right" />
-                </td>
-              ))}
+        <tbody ref={body}>
+          {start > 0 && (
+            <tr aria-hidden="true" style={{ height: start * TABLE_ROW }}>
+              <td colSpan={groups.length + 1} />
             </tr>
-          ))}
+          )}
+          {Array.from({ length: end - start }, (_, i) => {
+            const r = start + i
+            return (
+              <tr key={r} style={{ height: TABLE_ROW }}>
+                {named ? (
+                  <th scope="row" className="w-32 border border-border bg-muted p-0 text-left font-medium" data-cell={`${r},-1`}>
+                    <Cell value={rowNames[r] ?? ''} label={`Row ${r + 1} name`} onCommit={(text) => onRenameRow(r, text)} onPaste={(text) => onPaste(text, { group: -1, row: r })} className="h-7" />
+                  </th>
+                ) : (
+                  <th scope="row" className="border border-border bg-muted px-1.5 text-right font-normal text-muted-foreground">{r + 1}</th>
+                )}
+                {groups.map((g, c) => (
+                  <td key={c} className="border border-border p-0" data-cell={`${r},${c}`}>
+                    <Cell value={show(g.values[r])} label={`${g.name || `Group ${c + 1}`}, row ${r + 1}`} onCommit={(text) => onValue(c, r, text)} onPaste={(text) => onPaste(text, { group: c, row: r })} className="h-7 text-right" />
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
+          {end < rows && (
+            <tr aria-hidden="true" style={{ height: (rows - end) * TABLE_ROW }}>
+              <td colSpan={groups.length + 1} />
+            </tr>
+          )}
         </tbody>
       </table>
+      <button
+        type="button"
+        aria-label="Add column"
+        onClick={onAddGroup}
+        className="absolute top-0 bottom-0 left-full ml-2 flex w-32 flex-col items-stretch justify-center rounded-lg border border-dashed border-border-strong text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        {/* Centred in the button; on a tall table, held in the middle of the visible part while scrolling (a sticky offset of half the scroll area, less half the label's 3rem, from the top and the bottom). */}
+        <span className="sticky top-[calc(50%-1.5rem)] bottom-[calc(50%-1.5rem)] flex h-12 flex-col items-center justify-center gap-1 text-sm">
+          <Plus aria-hidden="true" className="size-6" />
+          New column
+        </span>
+      </button>
+      </div>
       <button type="button" onClick={onAddRow} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
         <Plus className="size-3.5" /> Row
       </button>
@@ -190,37 +571,107 @@ function TableView({ groups, colours, onValue, onRename, onPaste, onRemoveGroup,
 }
 
 function GroupsView(props: ChartDataEditorProps) {
-  const { groups, colours, onValue, onRename, onPaste, onRemoveGroup, onMoveGroup } = props
+  const { groups, colours, onMoveGroup } = props
   const drag = useGroupDrag(groups.length, onMoveGroup)
   const expanded = useExpandedControls()
-  if (expanded) return <GroupColumns {...props} />
+  const [part, setPart] = useState<'bars' | 'line'>('bars')
+  if (expanded) {
+    const { line } = props
+    if (!line) return <GroupColumns {...props} />
+    // Phones, bar + line charts: one set of columns at a time, switched above them. The line's columns keep the groups'
+    // names (renamed from either) but take their rows from the line; its rows can't be taken out one by one.
+    const shown: ChartDataEditorProps =
+      part === 'line'
+        ? { ...props, groups: groups.map((g, c) => ({ name: g.name, values: line.values[c] ?? [] })), onValue: line.onValue, onPaste: line.onPaste, onAddRow: line.onAddRow, onRemoveRow: undefined }
+        : props
+    return (
+      <div className="flex flex-col gap-2">
+        <Tabs
+          variant="segmented"
+          label="Values shown"
+          value={part}
+          onValueChange={(value) => setPart(value === 'line' ? 'line' : 'bars')}
+          // An icon before each name (owner's call, 2026-11-25).
+          tabs={[
+            {
+              value: 'bars',
+              label: (
+                <span className="flex items-center gap-1.5">
+                  <ChartColumn aria-hidden="true" className="size-4" /> Bars
+                </span>
+              ),
+            },
+            {
+              value: 'line',
+              label: (
+                <span className="flex items-center gap-1.5">
+                  <ChartLine aria-hidden="true" className="size-4" /> Line
+                </span>
+              ),
+            },
+          ]}
+          className="[&_[role=tablist]]:h-11 [&_[role=tablist]]:w-full"
+        />
+        <GroupColumns key={part} {...shown} />
+      </div>
+    )
+  }
   return (
     <div className="flex flex-wrap items-start gap-3">
-      {groups.map((g, c) => {
-        const count = g.values.filter((v) => v !== null).length
-        return (
-          <div key={c} data-grid className={cn('w-56 rounded-lg border p-2', drag.from === c && 'opacity-40', drag.over === c && 'shadow-[-3px_0_0_var(--primary)]')} {...drag.target(c)}>
-            <div className="mb-1.5 flex items-center gap-1.5" data-cell={`-1,0`}>
-              <Grip {...drag.grip(c)} />
-              <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: colours[c % colours.length] }} />
-              <Cell value={g.name} label={`Group ${c + 1} name`} onCommit={(text) => onRename(c, text)} onMove={(step) => onMoveGroup(c, c + step + (step > 0 ? 1 : 0))} className="rounded font-medium" />
-              <span className="shrink-0 text-xs text-muted-foreground">n = {count}</span>
-              <IconButton icon={Trash2} label={`Remove ${g.name || `group ${c + 1}`}`} size="sm" onClick={() => onRemoveGroup(c)} />
-            </div>
-            <div className="grid grid-cols-4 gap-1">
-              {[...g.values, null].map((v, r) => (
-                <span key={r} data-cell={`${r},0`} className="rounded border border-input-border bg-input">
-                  <Cell value={show(v)} label={`${g.name || `Group ${c + 1}`}, value ${r + 1}`} onCommit={(text) => onValue(c, r, text)} onPaste={(text) => onPaste(text, { group: c, row: r })} className="text-center text-xs" />
-                </span>
-              ))}
-            </div>
-          </div>
-        )
-      })}
+      {groups.map((g, c) => (
+        <GroupCard key={c} {...props} group={g} c={c} colour={colours[c % colours.length] ?? '#000000'} drag={drag} />
+      ))}
     </div>
   )
 }
 
+function GroupCard({ group: g, c, colour, drag, onValue, onRename, onPaste, onRemoveGroup, onMoveGroup, line }:ChartDataEditorProps & { group: DataGroup; c: number; colour: string; drag: ReturnType<typeof useGroupDrag> }) {
+  const count = g.values.filter((v) => v !== null).length
+  // Four values to a row, and one empty cell at the end to type the next value in.
+  const total = g.values.length + 1
+  const rows = Math.ceil(total / 4)
+  const grid = useRef<HTMLDivElement>(null)
+  const { start, end } = useRowWindow(rows, CARD_ROW, grid, 12)
+  return (
+    <div data-grid className={cn('w-56 rounded-lg border p-2', drag.from === c && 'opacity-40', drag.over === c && 'shadow-[-3px_0_0_var(--primary)]')} {...drag.target(c)}>
+      <div className="mb-1.5 flex items-center gap-1.5" data-cell="-1,0">
+        <Grip {...drag.grip(c)} />
+        <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full" style={{ background: colour }} />
+        <Cell value={g.name} label={`Group ${c + 1} name`} onCommit={(text) => onRename(c, text)} onMove={(step) => onMoveGroup(c, c + step + (step > 0 ? 1 : 0))} className="rounded font-medium" />
+        <span className="shrink-0 text-xs text-muted-foreground">n = {count}</span>
+        <IconButton icon={Trash2} label={`Remove ${g.name || `group ${c + 1}`}`} size="sm" onClick={() => onRemoveGroup(c)} />
+      </div>
+      <div ref={grid} className="grid grid-cols-4 gap-1" style={{ paddingTop: start * CARD_ROW, paddingBottom: (rows - end) * CARD_ROW }}>
+        {Array.from({ length: Math.min(end * 4, total) - start * 4 }, (_, i) => {
+          const r = start * 4 + i
+          return (
+            <span key={r} data-cell={`${r},0`} className="h-7 rounded border border-input-border bg-input">
+              <Cell value={show(g.values[r])} label={`${g.name || `Group ${c + 1}`}, value ${r + 1}`} onCommit={(text) => onValue(c, r, text)} onPaste={(text) => onPaste(text, { group: c, row: r })} className="h-full text-center text-xs" />
+            </span>
+          )
+        })}
+      </div>
+      {line && <GroupLineValues line={line} name={g.name || `Group ${c + 1}`} c={c} />}
+    </div>
+  )
+}
+
+/** Bar + line charts: a group's line values under its bar values in its card, four to a row with an empty cell to type the next in. */
+function GroupLineValues({ line, name, c }: { line: DataLine; name: string; c: number }) {
+  const values = line.values[c] ?? []
+  return (
+    <div data-grid className="mt-2 border-t pt-1.5">
+      <p className="mb-1 truncate text-xs text-muted-foreground">Line{line.title.trim() ? ` · ${line.title}` : ''}</p>
+      <div className="grid grid-cols-4 gap-1">
+        {Array.from({ length: values.length + 1 }, (_, r) => (
+          <span key={r} data-cell={`${r},0`} className="h-7 rounded border border-input-border bg-input">
+            <Cell value={show(values[r])} label={`Line, ${name}, value ${r + 1}`} onCommit={(text) => line.onValue(c, r, text)} onPaste={(text) => line.onPaste(text, { group: c, row: r })} className="h-full text-center text-xs" />
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 /** A group column's width and the gap after it, in px (7.5rem and gap-x-2). */
 const COLUMN_STEP = 128
